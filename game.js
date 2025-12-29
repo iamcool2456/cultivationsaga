@@ -2966,8 +2966,7 @@ function log(message) {
 function renderLog() {
   const logEl = document.getElementById('game-log')
   if (logEl) {
-    logEl.innerHTML = logMessages.map(m => `<div>${m}</div>`).join('')
-    logEl.scrollTop = logEl.scrollHeight
+    logEl.innerHTML = logMessages.slice().reverse().map(m => `<div>${m}</div>`).join('')
   }
 }
 
