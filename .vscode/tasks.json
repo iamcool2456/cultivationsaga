@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Install Dependencies",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.internal\\install_deps.bat",
+      "presentation": { "reveal": "always", "panel": "new" }
+    },
+    {
+      "label": "Start Dev Server (Start)",
+      "type": "shell",
+      "command": "${workspaceFolder}\\start_server.bat",
+      "presentation": { "reveal": "always", "panel": "new" }
+    },
+    {
+      "label": "Stop Dev Server (Kill)",
+      "type": "shell",
+      "command": "${workspaceFolder}\\kill_server.bat",
+      "presentation": { "reveal": "always", "panel": "new" }
+    }
+  ]
+}
