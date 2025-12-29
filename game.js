@@ -1452,7 +1452,8 @@ function renderFakeImmortal(container) {
       <div class="character-display">
         <div class="character-silhouette">🧙</div>
         <div class="character-info">
-          <div><strong>Self-Proclaimed Immortal</strong></div>
+          <div><strong>Alchemy Apprentice Phase</strong></div>
+          <div>A chance encounter with a "master"</div>
         </div>
       </div>
       
@@ -1480,8 +1481,8 @@ function renderWood(container) {
       <div class="character-display">
         <div class="character-silhouette">🪓</div>
         <div class="character-info">
-          <div><strong>${state.bloodline.name}</strong></div>
-          <div>${state.spiritualRoots.count} Spiritual Root${state.spiritualRoots.count > 1 ? 's' : ''}</div>
+          <div><strong>Lumberjack Phase</strong></div>
+          <div>Honest work in the forest</div>
         </div>
       </div>
       
@@ -1495,8 +1496,8 @@ function renderWood(container) {
           ${renderCultivationInfo()}
           
           <div class="action-panel">
-            <h2>Economic Pivot</h2>
-            <p class="story-text">Having learned your lesson, you discover a new path: chopping wood for silver coins. A more dignified trade.</p>
+            <h2>Lumberjack Phase</h2>
+            <p class="story-text">Having learned your lesson, you discover a new path: chopping wood for silver coins. The rhythmic swing of the axe and the scent of fresh timber mark your days.</p>
             
             <div class="button-group">
               <button onclick="window.rest()" ${state.stamina >= state.maxStamina ? 'disabled' : ''} class="${state.isResting ? 'resting' : ''}">
@@ -1539,12 +1540,13 @@ function renderSect(container) {
       <div class="character-display">
         <div class="character-silhouette">⛰️</div>
         <div class="character-info">
-          <div><strong>A Fork in the Road</strong></div>
+          <div><strong>The Crossroads</strong></div>
+          <div>A fateful decision awaits</div>
         </div>
       </div>
       
       <div class="action-panel">
-        <h2>Your Path Diverges</h2>
+        <h2>The Path Diverges</h2>
         <p class="story-text">A mysterious sect leader appears before you. "I sense potential in you, young one. Come, join the Cloud Sect and begin your true cultivation journey!"</p>
         
         <p class="story-text">Alternatively, you could use your silver to start a business in town...</p>
@@ -1568,6 +1570,14 @@ function renderCombat(container) {
   
   container.innerHTML = `
     <div class="game-screen">
+      <div class="character-display">
+        <div class="character-silhouette">⚔️</div>
+        <div class="character-info">
+          <div><strong>Combat Phase</strong></div>
+          <div>Life and death hang in the balance</div>
+        </div>
+      </div>
+      
       <div class="combat-view">
         <div class="combatant player-side">
           <div class="character-silhouette">🧘</div>
