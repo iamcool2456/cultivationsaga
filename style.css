@@ -1020,7 +1020,7 @@ button.cultivating {
   left: 90px;
   top: 50%;
   transform: translateY(-50%);
-  width: 280px;
+  width: 380px;
   background: 
     linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(26, 11, 46, 0.98));
   border: 3px solid transparent;
@@ -1168,7 +1168,7 @@ button.cultivating {
   left: 90px;
   top: 50%;
   transform: translateY(-50%);
-  width: 300px;
+  width: 650px;
   background: 
     linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(26, 11, 46, 0.98));
   border: 3px solid transparent;
@@ -1236,6 +1236,17 @@ button.cultivating {
   font-size: 0.9em;
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+.actions-columns {
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.actions-columns .actions-section {
+  flex: 1;
+  min-width: 0;
 }
 
 .actions-list {

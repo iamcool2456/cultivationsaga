@@ -1299,34 +1299,34 @@ function renderActionsPanel() {
   actionsPanel.innerHTML = `
     <h3>⚡ Actions</h3>
     
-    <div class="actions-section">
-      <h4>🔁 Repeatable Actions</h4>
-      <div class="actions-list">
-        ${state.repeatableActions.length === 0 ? '<div class="actions-empty">None available</div>' : ''}
-        ${state.repeatableActions.map((action, index) => {
-          const cooldownText = action.name === 'Gather Materials for Village' && state.villageMaterialsCooldown > 0 
-            ? `<br><small>Cooldown: ${state.villageMaterialsCooldown}s</small>` 
-            : ''
-          return `
-            <button class="action-button" onclick="window.executeAction('repeatable', ${index})" ${action.disabled ? 'disabled' : ''}>
-              ${action.icon || '⭐'} ${action.name}${cooldownText}
-            </button>
-          `
-        }).join('')}
+    <div class="actions-columns">
+      <div class="actions-section">
+        <h4>🔁 Repeatable Actions</h4>
+        <div class="actions-list">
+          ${state.repeatableActions.length === 0 ? '<div class="actions-empty">None available</div>' : ''}
+          ${state.repeatableActions.map((action, index) => {
+            const cooldownText = action.name === 'Gather Materials for Village' && state.villageMaterialsCooldown > 0 
+              ? `<br><small>Cooldown: ${state.villageMaterialsCooldown}s</small>` 
+              : ''
+            return `
+              <button class="action-button" onclick="window.executeAction('repeatable', ${index})" ${action.disabled ? 'disabled' : ''}>
+                ${action.icon || '⭐'} ${action.name}${cooldownText}
+              </button>
+            `
+          }).join('')}
+        </div>
       </div>
-    </div>
-    
-    <div class="actions-divider"></div>
-    
-    <div class="actions-section">
-      <h4>✨ Special Actions</h4>
-      <div class="actions-list">
-        ${state.specialActions.length === 0 ? '<div class="actions-empty">None available</div>' : ''}
-        ${state.specialActions.map((action, index) => `
-          <button class="action-button special" onclick="window.executeAction('special', ${index})" ${action.disabled ? 'disabled' : ''}>
-            ${action.icon || '🌟'} ${action.name}
-          </button>
-        `).join('')}
+      
+      <div class="actions-section">
+        <h4>✨ Special Actions</h4>
+        <div class="actions-list">
+          ${state.specialActions.length === 0 ? '<div class="actions-empty">None available</div>' : ''}
+          ${state.specialActions.map((action, index) => `
+            <button class="action-button special" onclick="window.executeAction('special', ${index})" ${action.disabled ? 'disabled' : ''}>
+              ${action.icon || '🌟'} ${action.name}
+            </button>
+          `).join('')}
+        </div>
       </div>
     </div>
   `
