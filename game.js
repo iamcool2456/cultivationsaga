@@ -612,6 +612,7 @@ const state = {
   // UI state
   showResetModal: false,
   resetPassword: '',
+  activeSidePanel: null, // 'stats', 'inventory', 'actions', or null
   
   // Inventory
   inventory: [],
@@ -881,13 +882,16 @@ function render() {
   // Always update log after render
   renderLog()
   
-  // Render stats panel (always visible)
+  // Render side panel toggle buttons and active panel
   if (state.phase !== 'FATE_ROLL') {
-    renderStatsPanel()
-    renderInventory()
-    renderActionsPanel()
+    renderSidePanelToggles()
+    renderActivePanel()
   } else {
-    // Remove stats panel on fate roll screen
+    // Remove toggle buttons and panels on fate roll screen
+    const toggles = document.getElementById('side-panel-toggles')
+    if (toggles) {
+      toggles.remove()
+    }
     const statsPanel = document.getElementById('stats-panel')
     if (statsPanel) {
       statsPanel.remove()
@@ -964,6 +968,61 @@ function renderDevButton() {
       <button onclick="window.showResetConfirmation()" class="dev-reset-button">🔓 Dev Reset</button>
     `
     document.body.appendChild(devButton)
+  }
+}
+
+// ============================================================================
+// SIDE PANEL TOGGLE SYSTEM
+// ============================================================================
+function renderSidePanelToggles() {
+  let togglesContainer = document.getElementById('side-panel-toggles')
+  if (!togglesContainer) {
+    togglesContainer = document.createElement('div')
+    togglesContainer.id = 'side-panel-toggles'
+    togglesContainer.className = 'side-panel-toggles'
+    document.body.appendChild(togglesContainer)
+  }
+  
+  togglesContainer.innerHTML = `
+    <button class="panel-toggle-btn ${state.activeSidePanel === 'stats' ? 'active' : ''}" onclick="window.toggleSidePanel('stats')" title="Stats">
+      📊
+    </button>
+    <button class="panel-toggle-btn ${state.activeSidePanel === 'inventory' ? 'active' : ''}" onclick="window.toggleSidePanel('inventory')" title="Inventory">
+      📦
+    </button>
+    <button class="panel-toggle-btn ${state.activeSidePanel === 'actions' ? 'active' : ''}" onclick="window.toggleSidePanel('actions')" title="Actions">
+      ⚡
+    </button>
+  `
+}
+
+window.toggleSidePanel = function(panelType) {
+  // Toggle the panel - if it's already active, close it; otherwise, open it
+  if (state.activeSidePanel === panelType) {
+    state.activeSidePanel = null
+  } else {
+    state.activeSidePanel = panelType
+  }
+  render()
+}
+
+function renderActivePanel() {
+  // Remove all panels first
+  const statsPanel = document.getElementById('stats-panel')
+  const inventoryPanel = document.getElementById('inventory-panel')
+  const actionsPanel = document.getElementById('actions-panel')
+  
+  if (statsPanel) statsPanel.remove()
+  if (inventoryPanel) inventoryPanel.remove()
+  if (actionsPanel) actionsPanel.remove()
+  
+  // Render only the active panel
+  if (state.activeSidePanel === 'stats') {
+    renderStatsPanel()
+  } else if (state.activeSidePanel === 'inventory') {
+    renderInventory()
+  } else if (state.activeSidePanel === 'actions') {
+    renderActionsPanel()
   }
 }
 
