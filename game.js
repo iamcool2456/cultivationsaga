@@ -612,7 +612,14 @@ const state = {
   // UI state
   showResetModal: false,
   resetPassword: '',
-  activeSidePanel: null, // 'stats', 'inventory', 'actions', or null
+  activeSidePanels: new Set(), // Set of 'stats', 'inventory', 'actions'
+
+  // Persisted drag offsets (CSS translate) per panel
+  panelPositions: {
+    stats: { x: 0, y: 0 },
+    inventory: { x: 0, y: 0 },
+    actions: { x: 0, y: 0 }
+  },
   
   // Inventory
   inventory: [],
@@ -676,7 +683,13 @@ function initializeManualMoveCooldowns() {
 // ============================================================================
 function saveGame() {
   try {
-    localStorage.setItem('cultivationSagaSave', JSON.stringify(state))
+    // Convert Set to array for JSON serialization
+    const stateToSave = {
+      ...state,
+      activeSidePanels: Array.from(state.activeSidePanels),
+      panelPositions: state.panelPositions
+    }
+    localStorage.setItem('cultivationSagaSave', JSON.stringify(stateToSave))
   } catch (e) {
     console.error('Failed to save game:', e)
   }
@@ -689,6 +702,30 @@ function loadGame() {
       const loadedState = JSON.parse(saved)
       // Restore all state properties
       Object.assign(state, loadedState)
+      
+      // Restore Set objects that were converted to arrays/objects during JSON serialization
+      // Also handle migration from old activeSidePanel (singular) to activeSidePanels (plural Set)
+      if (Array.isArray(loadedState.activeSidePanels)) {
+        state.activeSidePanels = new Set(loadedState.activeSidePanels)
+      } else if (loadedState.activeSidePanel) {
+        // Migrate old format: if there was an active panel, add it to the Set
+        state.activeSidePanels = new Set([loadedState.activeSidePanel])
+      } else {
+        state.activeSidePanels = new Set()
+      }
+
+      // Ensure panelPositions exists and has numeric x/y
+      if (!state.panelPositions) {
+        state.panelPositions = { stats: { x: 0, y: 0 }, inventory: { x: 0, y: 0 }, actions: { x: 0, y: 0 } }
+      }
+      for (const key of ['stats', 'inventory', 'actions']) {
+        const p = state.panelPositions[key] || {}
+        state.panelPositions[key] = {
+          x: Number.isFinite(p.x) ? p.x : 0,
+          y: Number.isFinite(p.y) ? p.y : 0
+        }
+      }
+      
       return true
     }
   } catch (e) {
@@ -864,6 +901,15 @@ function renderCultivationInfo() {
 // ============================================================================
 function render() {
   const app = document.getElementById('app')
+
+  // Ensure side panel state is always a Set (saved games may deserialize this as an array/object)
+  if (!(state.activeSidePanels instanceof Set)) {
+    if (Array.isArray(state.activeSidePanels)) {
+      state.activeSidePanels = new Set(state.activeSidePanels)
+    } else {
+      state.activeSidePanels = new Set()
+    }
+  }
   
   if (state.phase === 'FATE_ROLL') {
     renderFateRoll(app)
@@ -881,6 +927,10 @@ function render() {
   
   // Always update log after render
   renderLog()
+
+  // Ensure we have a main-container anchor + overlay layer for side panels.
+  // This must exist BEFORE rendering any side panels.
+  ensureSidePanelsOverlay()
   
   // Render side panel toggle buttons and active panel
   if (state.phase !== 'FATE_ROLL') {
@@ -919,6 +969,40 @@ function render() {
       modal.remove()
     }
   }
+}
+
+function getMainContainerElement() {
+  // Prefer the central container that holds cultivation + phase content.
+  // Fallback to action panel in phases that only show a central action panel.
+  return (
+    document.querySelector('.panels-container') ||
+    document.querySelector('.action-panel') ||
+    document.getElementById('app')
+  )
+}
+
+function ensureSidePanelsOverlay() {
+  const main = getMainContainerElement()
+  if (!main) return null
+
+  // Mark as anchor reference
+  if (!main.classList.contains('main-container')) {
+    main.classList.add('main-container')
+  }
+
+  // Ensure overlay layer exists inside the anchor
+  let overlay = main.querySelector('#side-panels-overlay')
+  if (!overlay) {
+    overlay = document.createElement('div')
+    overlay.id = 'side-panels-overlay'
+    overlay.className = 'side-panels-overlay'
+    main.appendChild(overlay)
+  }
+  return overlay
+}
+
+function getSidePanelsMount() {
+  return ensureSidePanelsOverlay() || document.body
 }
 
 function renderResetModal() {
@@ -984,60 +1068,93 @@ function renderSidePanelToggles() {
   }
   
   togglesContainer.innerHTML = `
-    <button class="panel-toggle-btn ${state.activeSidePanel === 'stats' ? 'active' : ''}" onclick="window.toggleSidePanel('stats')" title="Stats">
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('stats') ? 'active' : ''}" onclick="window.toggleSidePanel('stats')" title="Stats">
       📊
     </button>
-    <button class="panel-toggle-btn ${state.activeSidePanel === 'inventory' ? 'active' : ''}" onclick="window.toggleSidePanel('inventory')" title="Inventory">
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('inventory') ? 'active' : ''}" onclick="window.toggleSidePanel('inventory')" title="Inventory">
       📦
     </button>
-    <button class="panel-toggle-btn ${state.activeSidePanel === 'actions' ? 'active' : ''}" onclick="window.toggleSidePanel('actions')" title="Actions">
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('actions') ? 'active' : ''}" onclick="window.toggleSidePanel('actions')" title="Actions">
       ⚡
     </button>
   `
 }
 
 window.toggleSidePanel = function(panelType) {
-  // Toggle the panel - if it's already active, close it; otherwise, open it
-  if (state.activeSidePanel === panelType) {
-    state.activeSidePanel = null
+  // Toggle the panel - if it's already open, close it; otherwise, open it
+  if (state.activeSidePanels.has(panelType)) {
+    state.activeSidePanels.delete(panelType)
   } else {
-    state.activeSidePanel = panelType
+    state.activeSidePanels.add(panelType)
   }
   render()
 }
 
 function renderActivePanel() {
-  // Remove all panels first
+  // Render all active panels, remove inactive ones
   const statsPanel = document.getElementById('stats-panel')
   const inventoryPanel = document.getElementById('inventory-panel')
   const actionsPanel = document.getElementById('actions-panel')
   
-  if (statsPanel) statsPanel.remove()
-  if (inventoryPanel) inventoryPanel.remove()
-  if (actionsPanel) actionsPanel.remove()
+  // Remove panels that shouldn't be visible
+  if (statsPanel && !state.activeSidePanels.has('stats')) {
+    statsPanel.remove()
+  }
+  if (inventoryPanel && !state.activeSidePanels.has('inventory')) {
+    inventoryPanel.remove()
+  }
+  if (actionsPanel && !state.activeSidePanels.has('actions')) {
+    actionsPanel.remove()
+  }
   
-  // Render only the active panel
-  if (state.activeSidePanel === 'stats') {
+  // Render all active panels (will update if exists, create if not)
+  if (state.activeSidePanels.has('stats')) {
     renderStatsPanel()
-  } else if (state.activeSidePanel === 'inventory') {
+  }
+  if (state.activeSidePanels.has('inventory')) {
     renderInventory()
-  } else if (state.activeSidePanel === 'actions') {
+  }
+  if (state.activeSidePanels.has('actions')) {
     renderActionsPanel()
+  }
+
+  // Actions panel must appear BELOW inventory, same right column.
+  const inv = document.getElementById('inventory-panel')
+  const act = document.getElementById('actions-panel')
+  const actionsDragged = !!(state.panelPositions?.actions && (state.panelPositions.actions.x !== 0 || state.panelPositions.actions.y !== 0))
+  if (!actionsDragged) {
+    if (inv && act) {
+      act.style.top = (inv.offsetHeight + 16) + 'px'
+    } else if (act) {
+      act.style.top = '0px'
+    }
   }
 }
 
 function renderStatsPanel() {
   // Check if stats panel already exists
   let statsPanel = document.getElementById('stats-panel')
+  const isNewPanel = !statsPanel
+  
   if (!statsPanel) {
     statsPanel = document.createElement('div')
     statsPanel.id = 'stats-panel'
-    statsPanel.className = 'stats-panel'
-    document.body.appendChild(statsPanel)
+    statsPanel.className = 'stats-panel draggable-panel'
+    getSidePanelsMount().appendChild(statsPanel)
+
+    // Re-apply saved drag position so re-renders don't reset moved panels
+    const pos = state.panelPositions?.stats
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      statsPanel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
   }
   
   statsPanel.innerHTML = `
-    <h3>📊 Stats</h3>
+    <div class="panel-header" onmousedown="window.startDrag(event, 'stats-panel')">
+      <h3>📊 Stats</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content">
     <div class="stat-item">
       <span class="stat-label"><img src="/assets/battery.png" class="stat-icon" alt="Stamina"> Stamina:</span>
       <span class="stat-value">${state.stamina}/${state.maxStamina}</span>
@@ -1114,20 +1231,36 @@ function renderStatsPanel() {
         </div>
       ` : ''}
     ` : ''}
+    </div>
   `
+  
+  if (isNewPanel) {
+    // Panel was just created
+  }
 }
 
 function renderInventory() {
   let inventoryPanel = document.getElementById('inventory-panel')
+  const isNewPanel = !inventoryPanel
+  
   if (!inventoryPanel) {
     inventoryPanel = document.createElement('div')
     inventoryPanel.id = 'inventory-panel'
-    inventoryPanel.className = 'inventory-panel'
-    document.body.appendChild(inventoryPanel)
+    inventoryPanel.className = 'inventory-panel draggable-panel'
+    getSidePanelsMount().appendChild(inventoryPanel)
+
+    const pos = state.panelPositions?.inventory
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      inventoryPanel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
   }
   
   inventoryPanel.innerHTML = `
-    <h3>📦 Inventory</h3>
+    <div class="panel-header" onmousedown="window.startDrag(event, 'inventory-panel')">
+      <h3>📦 Inventory</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content">
     <div class="inventory-items">
       ${state.inventory.length === 0 ? '<div class="inventory-empty">Empty</div>' : ''}
       ${state.inventory.map((item, index) => `
@@ -1140,16 +1273,28 @@ function renderInventory() {
         </div>
       `).join('')}
     </div>
+    </div>
   `
+  
+  if (isNewPanel) {
+    // Panel was just created
+  }
 }
 
 function renderActionsPanel() {
   let actionsPanel = document.getElementById('actions-panel')
+  const isNewPanel = !actionsPanel
+  
   if (!actionsPanel) {
     actionsPanel = document.createElement('div')
     actionsPanel.id = 'actions-panel'
-    actionsPanel.className = 'actions-panel'
-    document.body.appendChild(actionsPanel)
+    actionsPanel.className = 'actions-panel draggable-panel'
+    getSidePanelsMount().appendChild(actionsPanel)
+
+    const pos = state.panelPositions?.actions
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      actionsPanel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
   }
   
   // Update action states dynamically based on current game state
@@ -1297,8 +1442,11 @@ function renderActionsPanel() {
   }
   
   actionsPanel.innerHTML = `
-    <h3>⚡ Actions</h3>
-    
+    <div class="panel-header" onmousedown="window.startDrag(event, 'actions-panel')">
+      <h3>⚡ Actions</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content">
     <div class="actions-columns">
       <div class="actions-section">
         <h4>🔁 Repeatable Actions</h4>
@@ -1329,7 +1477,12 @@ function renderActionsPanel() {
         </div>
       </div>
     </div>
+    </div>
   `
+  
+  if (isNewPanel) {
+    // Panel was just created
+  }
 }
 
 function renderFateRoll(container) {
@@ -3053,6 +3206,89 @@ setInterval(() => {
     saveGame()
   }
 }, 1000)
+
+// ============================================================================
+// DRAG FUNCTIONALITY - Using transform-based dragging
+// ============================================================================
+let draggedElement = null
+let dragStartX = 0
+let dragStartY = 0
+let currentTranslateX = 0
+let currentTranslateY = 0
+
+window.startDrag = function(event, elementId) {
+  draggedElement = document.getElementById(elementId)
+  if (!draggedElement) return
+  
+  event.preventDefault()
+  event.stopPropagation()
+  
+  // Get current mouse position
+  dragStartX = event.clientX
+  dragStartY = event.clientY
+  
+  // Check if there's already a manual translate applied (from previous drags)
+  const currentTransform = draggedElement.style.transform || ''
+  const translateMatch = currentTransform.match(/translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/)
+  
+  if (translateMatch) {
+    // Continue from existing drag position
+    currentTranslateX = parseFloat(translateMatch[1])
+    currentTranslateY = parseFloat(translateMatch[2])
+  } else {
+    // First time dragging - start from 0,0 (element's CSS position)
+    currentTranslateX = 0
+    currentTranslateY = 0
+    
+    // If this is the first drag, explicitly set transform to translate(0,0)
+    // to avoid any jump from CSS-based positioning
+    draggedElement.style.transform = 'translate(0px, 0px)'
+  }
+  
+  document.addEventListener('mousemove', dragMove)
+  document.addEventListener('mouseup', dragEnd)
+  
+  // Add dragging class for visual feedback
+  draggedElement.classList.add('dragging')
+}
+
+function dragMove(event) {
+  if (!draggedElement) return
+  
+  // Calculate how far the mouse has moved since drag started
+  const deltaX = event.clientX - dragStartX
+  const deltaY = event.clientY - dragStartY
+  
+  // Apply the delta to the current translate values
+  const newTranslateX = currentTranslateX + deltaX
+  const newTranslateY = currentTranslateY + deltaY
+  
+  // Apply as a CSS transform (this doesn't interfere with the original positioning)
+  draggedElement.style.transform = `translate(${newTranslateX}px, ${newTranslateY}px)`
+}
+
+function dragEnd() {
+  if (draggedElement) {
+    draggedElement.classList.remove('dragging')
+
+    // Persist final translate so panel position survives re-renders
+    const id = draggedElement.id
+    const key = id === 'stats-panel' ? 'stats' : id === 'inventory-panel' ? 'inventory' : id === 'actions-panel' ? 'actions' : null
+    if (key) {
+      const currentTransform = draggedElement.style.transform || ''
+      const translateMatch = currentTransform.match(/translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/)
+      if (translateMatch) {
+        const x = parseFloat(translateMatch[1])
+        const y = parseFloat(translateMatch[2])
+        state.panelPositions[key] = { x, y }
+        saveGame()
+      }
+    }
+  }
+  draggedElement = null
+  document.removeEventListener('mousemove', dragMove)
+  document.removeEventListener('mouseup', dragEnd)
+}
 
 // ============================================================================
 // INITIALIZATION
