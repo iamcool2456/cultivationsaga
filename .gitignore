@@ -7,6 +7,9 @@ dist/
 .env
 .vite_dev.pid
 
+# Downloaded on-demand (see share_cloudflare_tunnel.bat)
+.internal/bin/cloudflared.exe
+
 # OS / editor noise
 **/desktop.ini
 Thumbs.db
