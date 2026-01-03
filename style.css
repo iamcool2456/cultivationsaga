@@ -78,7 +78,14 @@ body:not(.phase-intro-loading) .combat-view,
 body:not(.phase-intro-loading) .stats-panel,
 body:not(.phase-intro-loading) .inventory-panel,
 body:not(.phase-intro-loading) .actions-panel,
+body:not(.phase-intro-loading) .herbalism-panel,
+body:not(.phase-intro-loading) .settings-panel,
+body:not(.phase-intro-loading) .recipe-book-panel,
 body:not(.phase-intro-loading) .profile-panel,
+body:not(.phase-intro-loading) .sect-panel,
+body:not(.phase-intro-loading) .quest-panel,
+body:not(.phase-intro-loading) .moves-panel,
+body:not(.phase-intro-loading) .shop-panel,
 body:not(.phase-intro-loading) .conquered-sects-panel,
 body:not(.phase-intro-loading) .modal-content {
   background: var(--paper);
@@ -200,6 +207,9 @@ body:not(.phase-intro-loading) .actions-panel .panel-header {
 .side-panels-overlay .stats-panel,
 .side-panels-overlay .inventory-panel,
 .side-panels-overlay .actions-panel,
+.side-panels-overlay .herbalism-panel,
+.side-panels-overlay .settings-panel,
+.side-panels-overlay .recipe-book-panel,
 .side-panels-overlay .profile-panel,
 .side-panels-overlay .sect-panel,
 .side-panels-overlay .quest-panel,
@@ -2689,6 +2699,201 @@ button.cultivating {
   overflow: auto;
 }
 
+/* Settings Panel */
+.settings-panel {
+  position: absolute;
+  left: 100%;
+  margin-left: 16px;
+  top: 0;
+  width: min(420px, calc(100vw - 48px));
+  background:
+    linear-gradient(180deg, #f5f5f5, var(--paper-2));
+  border: 2px solid var(--frame);
+  border-radius: 8px;
+  padding: 0;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.08);
+  z-index: 100;
+  min-width: 300px;
+  min-height: 220px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  resize: both;
+  overflow: auto;
+}
+
+/* Recipe Book Panel */
+.recipe-book-panel {
+  position: absolute;
+  left: 100%;
+  margin-left: 16px;
+  top: 0;
+  width: min(460px, calc(100vw - 48px));
+  background:
+    linear-gradient(180deg, #f5f5f5, var(--paper-2));
+  border: 2px solid var(--frame);
+  border-radius: 8px;
+  padding: 0;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.08);
+  z-index: 100;
+  min-width: 320px;
+  min-height: 220px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  resize: both;
+  overflow: auto;
+}
+
+/* Herbalism Panel */
+.herbalism-panel {
+  position: absolute;
+  left: 100%;
+  margin-left: 16px;
+  top: 0;
+  width: min(420px, calc(100vw - 48px));
+  background:
+    linear-gradient(180deg, #f5f5f5, var(--paper-2));
+  border: 2px solid var(--frame);
+  border-radius: 8px;
+  padding: 0;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.08);
+  z-index: 100;
+  min-width: 300px;
+  min-height: 220px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  resize: both;
+  overflow: auto;
+}
+
+.herbalism-panel .panel-content {
+  max-height: calc(100% - 80px);
+}
+
+.herbalism-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.herbalism-summary {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.herbalism-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(17, 24, 39, 0.85);
+}
+
+.herbalism-block-title {
+  color: var(--ink-muted);
+  font-weight: 900;
+  letter-spacing: 1px;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.herbalism-btn {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 12px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  background: linear-gradient(180deg, var(--ink), rgba(17, 24, 39, 0.85));
+  color: #ffffff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+
+.herbalism-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.herbalism-hint {
+  margin-top: 8px;
+  color: rgba(17, 24, 39, 0.7);
+  line-height: 1.35;
+}
+
+.herbalism-craft-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.herbalism-craft-slot {
+  border: 2px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.55);
+  color: rgba(17, 24, 39, 0.9);
+  border-radius: 10px;
+  padding: 10px 10px;
+  font-weight: 900;
+}
+
+.herbalism-picker {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.herbalism-picker-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.herbalism-picker-item {
+  width: 100%;
+  border: 2px solid rgba(0, 0, 0, 0.18);
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 10px 10px;
+  font-weight: 900;
+  text-align: left;
+}
+
+.herbalism-picker-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.herbalism-progress {
+  margin-top: 10px;
+}
+
+.herbalism-progress-bar {
+  position: relative;
+  height: 12px;
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.herbalism-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: var(--ink-muted);
+}
+
 /* Conquered Sects Panel */
 .conquered-sects-panel {
   position: absolute;
@@ -2935,8 +3140,19 @@ button.cultivating {
   border: 2px solid rgba(0, 0, 0, 0.22);
   background: rgba(255, 255, 255, 0.75);
   padding: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.rebirth-node-icon {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .rebirth-node.available {
@@ -2963,6 +3179,12 @@ button.cultivating {
   letter-spacing: 0.3px;
   text-align: center;
   padding: 0 6px;
+}
+
+.rebirth-node-modal-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .moves-panel .panel-content {
@@ -2992,8 +3214,8 @@ button.cultivating {
 
 .moves-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
   border-radius: 10px;
@@ -3004,6 +3226,53 @@ button.cultivating {
 .moves-row-label {
   font-weight: 800;
   color: rgba(17, 24, 39, 0.85);
+}
+
+.moves-row-meta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.9em;
+  color: rgba(17, 24, 39, 0.7);
+}
+
+@media (max-width: 520px) {
+  .side-panel-toggles {
+    left: 10px;
+    grid-template-columns: repeat(3, 44px);
+    grid-template-rows: repeat(4, 44px);
+    grid-auto-rows: 0;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .panel-toggle-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+
+  .panel-toggle-btn .ui-inline-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .shop-card {
+    flex: 0 0 260px;
+    height: 420px;
+  }
+
+  .shop-card-imgwrap {
+    width: 112px;
+    height: 112px;
+  }
+
+  .shop-card-img {
+    width: 96px;
+    height: 96px;
+  }
+
+  .shop-card-price {
+    font-size: 1.4em;
+  }
 }
 
 .moves-row-slots {
@@ -3724,9 +3993,11 @@ button.cultivating {
   transform: translateY(-50%);
   display: grid;
   grid-template-columns: repeat(3, 50px);
-  grid-auto-rows: 50px;
+  grid-template-rows: repeat(4, 50px);
+  grid-auto-rows: 0;
   gap: 10px;
   z-index: 101;
+  overflow: hidden;
 }
 
 .panel-toggle-btn {

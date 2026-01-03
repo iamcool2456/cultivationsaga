@@ -1,4 +1,3 @@
-import './style.css'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
@@ -169,6 +168,8 @@ function renderUiIcon(name, opts = {}) {
       return withTitle('<path d="M14 3l7 7-3 3-7-7 3-3Z"/><path d="M2 21l7-7"/><path d="M6 18l-3 3"/>')
     case 'shop':
       return withTitle('<path d="M6 7l2-4h8l2 4"/><path d="M4 7h16l-1 14H5L4 7Z"/><path d="M9 11v0"/><path d="M15 11v0"/>')
+    case 'settings':
+      return withTitle('<path d="M12 1l1.5 2.6 3-.2 1.2 2.8 2.7 1.1-.9 2.9 1.9 2.4-1.9 2.4.9 2.9-2.7 1.1-1.2 2.8-3-.2L12 23l-1.5-2.6-3 .2-1.2-2.8-2.7-1.1.9-2.9L2.6 12 4.5 9.6l-.9-2.9 2.7-1.1 1.2-2.8 3 .2L12 1Z"/><circle cx="12" cy="12" r="3"/>')
     case 'flag':
       return withTitle('<path d="M5 3v18"/><path d="M5 4h11l-1.5 3L16 10H5"/>')
     case 'dice':
@@ -340,9 +341,10 @@ const BLOODLINE_TIER_WEIGHT_MULT = {
   5: 1,
   4: 1,
   3: 1,
-  2: 0.6,
-  1: 0.35,
-  0: 0.12
+  // Make high tiers meaningfully rarer early; rebirth luck upgrades can offset this.
+  2: 0.4,
+  1: 0.2,
+  0: 0.06
 }
 
 function getBloodlineWeightMultiplier(tier) {
@@ -357,7 +359,12 @@ const SPIRITUAL_ROOTS = [
   { count: 2, weight: 21, qiMult: 3.2 },
   { count: 3, weight: 6.5, qiMult: 5.8 },
   { count: 4, weight: 2.3, qiMult: 8.3 },
-  { count: 5, weight: 0.9, qiMult: 12.8 }
+  { count: 5, weight: 0.9, qiMult: 12.8 },
+  { count: 6, weight: 0.35, qiMult: 17.0 },
+  { count: 7, weight: 0.15, qiMult: 22.0 },
+  { count: 8, weight: 0.06, qiMult: 28.0 },
+  { count: 9, weight: 0.025, qiMult: 36.0 },
+  { count: 10, weight: 0.01, qiMult: 46.0 }
 ]
 
 // ============================================================================
@@ -418,7 +425,8 @@ const BASIC_MOVES = {
 }
 
 // Unlocked when ANY manual is equipped. Display name changes for specific manuals.
-const QI_BLAST_MOVE = { id: 'qiBlast', name: 'Qi Blast', icon: '⚡', damageMult: 3, qiCost: 10, cooldownMs: 3000 }
+// Combat moves are cooldown-only (no Qi costs).
+const QI_BLAST_MOVE = { id: 'qiBlast', name: 'Qi Blast', icon: '⚡', damageMult: 3, qiCost: 0, cooldownMs: 3000 }
 
 // ============================================================================
 // MANUAL SPECIAL MOVES DATA
@@ -938,6 +946,20 @@ const state = {
   cultivationMajorIndex: 0, // Index in CULTIVATION_REALMS array
   cultivationSubIndex: 0, // Index in subRealms array (0-8 for I-IX)
 
+  // Best-ever progress (persists across rebirth via meta)
+  bestMajorRealm: {
+    index: 0,
+    isDemon: false,
+    label: ''
+  },
+  bestRebirthPoints: 0,
+
+  // Global leaderboards (downloaded on demand)
+  leaderboards: {
+    major: { rows: [], loading: false, error: '', fetchedAt: 0 },
+    rebirth: { rows: [], loading: false, error: '', fetchedAt: 0 }
+  },
+
   // Age / Lifespan (months)
   // Cultivating accelerates aging; lifespan can be extended via breakthroughs.
   ageMonths: 0,
@@ -956,6 +978,7 @@ const state = {
   dozeOffUnlocked: false,
   demonCabinRevengeStage: '',
   runEnded: false,
+  hardMode: false,
 
   // Orthodox: True ending chain
   orthodoxWarStage: 0, // 0..6
@@ -1074,23 +1097,57 @@ const state = {
   
   // Rebirth / Meta
   rebirthPoints: 0,
+  // Tracks the last computed spirit-stone bonus so we can apply deltas.
+  // (1 Rebirth Point per 500 Low/Mid/High spirit stones; decreases when spent.)
+  rebirthStoneBonusLast: 0,
   rebirthUpgrades: {
     minRootCount: 1,
     maxRootCount: 5,
     bloodlineBias: 0,
-    canRerollFate: false
+    canRerollFate: false,
+    resetUnlockProgress: 0,
+    qiMultiplierLevel: 0,
+
+    // Infinite nodes
+    herbGatherSpeedLevel: 0,
+    herbMultiGatherLevel: 0,
+    strengthMultiplierLevel: 0,
+    healthMultiplierLevel: 0,
+    specialCooldownLevel: 0,
+    repeatableSpeedLevel: 0,
+    autoGatherLevel: 0,
+    autoCraftLevel: 0,
+    pillCraftSpeedLevel: 0,
+    minRootBonusLevel: 0,
+
+    // Fate / meta luck nodes
+    rootLuckLevel: 0,
+    maxRootBonusLevel: 0,
+    extraRerollsLevel: 0,
+    bloodlineLuckLevel: 0,
+    multiAffinityLuckLevel: 0,
+    affinityAlignmentLuckLevel: 0,
+    storyLuckLuckLevel: 0,
+    spiritStoneRpMultLevel: 0,
+    questDropChanceLevel: 0
   },
+
+  // Tracks which story milestones already granted RP this run.
+  rebirthStoryAwards: {},
   
   // Fate rerolls
   rerollsRemaining: 5,
   
   // UI state
   showResetModal: false,
+  showRebirthNodeModal: false,
+  rebirthNodeModalId: null,
+  autoCraftPillFile: '',
   devModalMode: 'RESET', // 'RESET' | 'SPEED'
   resetPassword: '',
   devSpeed3x: false,
   devIgnoreRequirements: false,
-  activeSidePanels: new Set(), // Set of 'stats', 'inventory', 'actions', 'profile', 'sect', 'quests', 'moves', 'shop'
+  activeSidePanels: new Set(), // Set of 'stats', 'inventory', 'actions', 'profile', 'sect', 'quests', 'moves', 'shop', 'herbalism'
 
   // Sect panel UI
   sectJoinPickerOpen: false,
@@ -1128,6 +1185,9 @@ const state = {
     stats: { x: 0, y: 0 },
     inventory: { x: 0, y: 0 },
     actions: { x: 0, y: 0 },
+    herbalism: { x: 0, y: 0 },
+    settings: { x: 0, y: 0 },
+    recipes: { x: 0, y: 0 },
     profile: { x: 0, y: 0 },
     sect: { x: 0, y: 0 },
     quests: { x: 0, y: 0 },
@@ -2214,24 +2274,310 @@ function initializeManualMoveCooldowns() {
 
 const META_STORAGE_KEY = 'cultivationSagaMeta'
 
+function getLeaderboardConfig() {
+  // Vite exposes VITE_* env vars to client bundles.
+  const url = String(import.meta?.env?.VITE_SUPABASE_URL ?? '').trim()
+  const anonKey = String(import.meta?.env?.VITE_SUPABASE_ANON_KEY ?? '').trim()
+  return { url, anonKey }
+}
+
+function isLeaderboardConfigured() {
+  const cfg = getLeaderboardConfig()
+  return Boolean(cfg.url && cfg.anonKey)
+}
+
+function getCurrentMajorRealmLabel() {
+  try {
+    const realm = getCurrentCultivationRealm()
+    if (state.isDemonPath) {
+      return `Demonic Major Realm ${clampNonNegativeInt(state.cultivationMajorIndex) + 1} — ${realm.major}`
+    }
+    return `${realm.major}`
+  } catch (_) {
+    return ''
+  }
+}
+
+function syncBestMajorRealm() {
+  const idx = clampNonNegativeInt(state.cultivationMajorIndex)
+  const currentIsDemon = Boolean(state.isDemonPath)
+
+  if (!state.bestMajorRealm || typeof state.bestMajorRealm !== 'object') {
+    state.bestMajorRealm = { index: 0, isDemon: false, label: '' }
+  }
+
+  const prevIdx = clampNonNegativeInt(state.bestMajorRealm.index)
+  if (idx < prevIdx) return
+
+  // If equal index, prefer non-demon label stability; otherwise update.
+  if (idx === prevIdx && Boolean(state.bestMajorRealm.isDemon) && !currentIsDemon) {
+    state.bestMajorRealm.isDemon = currentIsDemon
+    state.bestMajorRealm.label = getCurrentMajorRealmLabel()
+    return
+  }
+
+  if (idx > prevIdx || state.bestMajorRealm.label === '') {
+    state.bestMajorRealm.index = idx
+    state.bestMajorRealm.isDemon = currentIsDemon
+    state.bestMajorRealm.label = getCurrentMajorRealmLabel()
+  }
+}
+
+function syncBestRebirthPoints() {
+  const cur = clampNonNegativeInt(state.rebirthPoints)
+  if (!Number.isFinite(state.bestRebirthPoints) || state.bestRebirthPoints < 0) state.bestRebirthPoints = 0
+  state.bestRebirthPoints = Math.max(clampNonNegativeInt(state.bestRebirthPoints), cur)
+}
+
+function computeRebirthPointsFromSpiritStones() {
+  const low = clampNonNegativeInt(state.spiritStonesLow)
+  const mid = clampNonNegativeInt(state.spiritStonesMid)
+  const high = clampNonNegativeInt(state.spiritStonesHigh)
+  const base = Math.floor(low / 500) + Math.floor(mid / 500) + Math.floor(high / 500)
+  const mult = getRebirthSpiritStoneRpMultiplier()
+  return Math.floor(base * mult)
+}
+
+function syncRebirthPointsWithSpiritStoneBonus() {
+  const current = clampNonNegativeInt(computeRebirthPointsFromSpiritStones())
+  const prev = Number.isFinite(state.rebirthStoneBonusLast)
+    ? clampNonNegativeInt(state.rebirthStoneBonusLast)
+    : 0
+  const delta = current - prev
+  if (delta === 0) return
+
+  if (!Number.isFinite(state.rebirthPoints) || state.rebirthPoints < 0) state.rebirthPoints = 0
+  state.rebirthPoints = Math.max(0, Math.floor(state.rebirthPoints + delta))
+  state.rebirthStoneBonusLast = current
+  try { syncBestRebirthPoints() } catch (_) {}
+  try { saveMeta() } catch (_) {}
+}
+
 function normalizeRebirthUpgrades(u) {
   const up = (u && typeof u === 'object') ? u : {}
   const minRootCount = clampNonNegativeInt(up.minRootCount)
   const maxRootCount = clampNonNegativeInt(up.maxRootCount)
   const bloodlineBias = clampNonNegativeNumber(up.bloodlineBias)
+  const resetUnlockProgress = clampNonNegativeInt(up.resetUnlockProgress)
+  const qiMultiplierLevel = clampNonNegativeInt(up.qiMultiplierLevel)
+  const herbGatherSpeedLevel = clampNonNegativeInt(up.herbGatherSpeedLevel)
+  const herbMultiGatherLevel = clampNonNegativeInt(up.herbMultiGatherLevel)
+  const strengthMultiplierLevel = clampNonNegativeInt(up.strengthMultiplierLevel)
+  const healthMultiplierLevel = clampNonNegativeInt(up.healthMultiplierLevel)
+  const specialCooldownLevel = clampNonNegativeInt(up.specialCooldownLevel)
+  const repeatableSpeedLevel = clampNonNegativeInt(up.repeatableSpeedLevel)
+  const autoGatherLevel = clampNonNegativeInt(up.autoGatherLevel)
+  const autoCraftLevel = clampNonNegativeInt(up.autoCraftLevel)
+  const pillCraftSpeedLevel = clampNonNegativeInt(up.pillCraftSpeedLevel)
+  const minRootBonusLevel = clampNonNegativeInt(up.minRootBonusLevel)
+  const rootLuckLevel = clampNonNegativeInt(up.rootLuckLevel)
+  const maxRootBonusLevel = clampNonNegativeInt(up.maxRootBonusLevel)
+  const extraRerollsLevel = clampNonNegativeInt(up.extraRerollsLevel)
+  const bloodlineLuckLevel = clampNonNegativeInt(up.bloodlineLuckLevel)
+  const multiAffinityLuckLevel = clampNonNegativeInt(up.multiAffinityLuckLevel)
+  const affinityAlignmentLuckLevel = clampNonNegativeInt(up.affinityAlignmentLuckLevel)
+  const storyLuckLuckLevel = clampNonNegativeInt(up.storyLuckLuckLevel)
+  const spiritStoneRpMultLevel = clampNonNegativeInt(up.spiritStoneRpMultLevel)
+  const questDropChanceLevel = clampNonNegativeInt(up.questDropChanceLevel)
   return {
     minRootCount: Math.max(1, minRootCount || 1),
     maxRootCount: Math.max(1, maxRootCount || 5),
     bloodlineBias: Number.isFinite(bloodlineBias) ? bloodlineBias : 0,
-    canRerollFate: Boolean(up.canRerollFate)
+    canRerollFate: Boolean(up.canRerollFate),
+    resetUnlockProgress: Math.max(0, Math.min(100, resetUnlockProgress)),
+    qiMultiplierLevel: Math.max(0, qiMultiplierLevel),
+
+    herbGatherSpeedLevel: Math.max(0, herbGatherSpeedLevel),
+    herbMultiGatherLevel: Math.max(0, herbMultiGatherLevel),
+    strengthMultiplierLevel: Math.max(0, strengthMultiplierLevel),
+    healthMultiplierLevel: Math.max(0, healthMultiplierLevel),
+    specialCooldownLevel: Math.max(0, specialCooldownLevel),
+    repeatableSpeedLevel: Math.max(0, repeatableSpeedLevel),
+    autoGatherLevel: Math.max(0, autoGatherLevel),
+    autoCraftLevel: Math.max(0, autoCraftLevel),
+    pillCraftSpeedLevel: Math.max(0, pillCraftSpeedLevel),
+    minRootBonusLevel: Math.max(0, minRootBonusLevel),
+
+    rootLuckLevel: Math.max(0, rootLuckLevel),
+    maxRootBonusLevel: Math.max(0, maxRootBonusLevel),
+    extraRerollsLevel: Math.max(0, extraRerollsLevel),
+    bloodlineLuckLevel: Math.max(0, bloodlineLuckLevel),
+    multiAffinityLuckLevel: Math.max(0, multiAffinityLuckLevel),
+    affinityAlignmentLuckLevel: Math.max(0, affinityAlignmentLuckLevel),
+    storyLuckLuckLevel: Math.max(0, storyLuckLuckLevel),
+    spiritStoneRpMultLevel: Math.max(0, spiritStoneRpMultLevel),
+    questDropChanceLevel: Math.max(0, questDropChanceLevel)
   }
+}
+
+function getRebirthInfiniteNodeCost(level, scale = 1.5) {
+  const lvl = clampNonNegativeInt(level)
+  const s = Number(scale)
+  const safeScale = (Number.isFinite(s) && s > 1) ? s : 1.5
+  return Math.max(1, Math.ceil(1 * Math.pow(safeScale, lvl)))
+}
+
+function getRebirthSpiritStoneRpMultiplier() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  // Each purchase adds +2× (1 + 2*level)
+  return 1 + (2 * clampNonNegativeInt(u.spiritStoneRpMultLevel))
+}
+
+function getRebirthStrengthMultiplier() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return 1 + (0.1 * clampNonNegativeInt(u.strengthMultiplierLevel))
+}
+
+function getRebirthHealthMultiplier() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return 1 + (0.1 * clampNonNegativeInt(u.healthMultiplierLevel))
+}
+
+function getRebirthHerbGatherSpeedMultiplier() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return 1 + (0.05 * clampNonNegativeInt(u.herbGatherSpeedLevel))
+}
+
+function getRebirthHerbsPerGather() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  const lvl = clampNonNegativeInt(u.herbMultiGatherLevel)
+  // +10% per level; 100% => 2 herbs, 200% => 3 herbs, etc.
+  return 1 + Math.floor(lvl / 10)
+}
+
+function isRebirthAutoGatherUnlocked() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  // +5% per level; unlock at 100%
+  return clampNonNegativeInt(u.autoGatherLevel) >= 20
+}
+
+function isRebirthAutoCraftUnlocked() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  // +5% per level; unlock at 100%
+  return clampNonNegativeInt(u.autoCraftLevel) >= 20
+}
+
+function getRebirthPillCraftDurationReductionMs() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return clampNonNegativeInt(u.pillCraftSpeedLevel) * 250
+}
+
+function getRebirthRepeatableDurationReductionMs() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return clampNonNegativeInt(u.repeatableSpeedLevel) * 250
+}
+
+function getRebirthSpecialCooldownReductionSeconds() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return clampNonNegativeInt(u.specialCooldownLevel) * 0.5
+}
+
+function getRebirthQiMultiplierLevel() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return clampNonNegativeInt(u.qiMultiplierLevel)
+}
+
+function getRebirthQiMultiplier() {
+  const lvl = getRebirthQiMultiplierLevel()
+  return 1 + (0.2 * lvl)
+}
+
+function getRebirthQiMultiplierNextCost() {
+  const lvl = getRebirthQiMultiplierLevel()
+  const base = 1
+  const cost = base * Math.pow(1.5, lvl)
+  // Keep it simple and always increasing.
+  return Math.max(1, Math.ceil(cost))
+}
+
+function ensureRebirthStoryAwards() {
+  if (!state.rebirthStoryAwards || typeof state.rebirthStoryAwards !== 'object') state.rebirthStoryAwards = {}
+}
+
+function awardStoryMilestoneOnce(key, points, reason) {
+  ensureRebirthStoryAwards()
+  const k = String(key || '')
+  if (!k) return
+  if (state.rebirthStoryAwards[k]) return
+  state.rebirthStoryAwards[k] = true
+  awardRebirthPoints(points, reason)
+}
+
+function reconcileRebirthPointsFromStoryProgress() {
+  // This runs during saveGame() so story progression awards happen naturally while playing.
+  ensureRebirthStoryAwards()
+
+  // Cloud Sect story progress
+  const cloudStage = clampNonNegativeInt(state.cloudCultivatorStoryStage)
+  if (cloudStage >= 1) awardStoryMilestoneOnce('cloud_stage_1', 1, 'Cloud Sect')
+  if (cloudStage >= 3) awardStoryMilestoneOnce('cloud_stage_3', 2, 'Cloud Sect')
+  if (cloudStage >= 5) awardStoryMilestoneOnce('cloud_stage_5', 3, 'Cloud Sect')
+
+  // Cloud conquest / coalition endgame
+  if (Boolean(state.cloudConqueredSectsUnlocked)) awardStoryMilestoneOnce('cloud_conquest_unlocked', 5, 'Cloud Conquest')
+  const warStage = clampNonNegativeInt(state.cloudCoalitionWarStage)
+  if (warStage >= 3) awardStoryMilestoneOnce('cloud_coalition_mid', 8, 'Cloud Coalition')
+  if (Boolean(state.cloudFinalConfrontationCinematicDone) || warStage >= 5) {
+    awardStoryMilestoneOnce('cloud_coalition_final', 20, 'Cloud Coalition Finale')
+  }
+
+  // Business path milestones
+  if (Boolean(state.hasStartedBusiness)) awardStoryMilestoneOnce('biz_started', 2, 'Business')
+  if (Boolean(state.businessUpgradedExpansion)) awardStoryMilestoneOnce('biz_expansion', 2, 'Business')
+  if (Boolean(state.businessUpgradedEmployees)) awardStoryMilestoneOnce('biz_employees', 2, 'Business')
+  if (Boolean(state.businessStormHeavensStarted)) awardStoryMilestoneOnce('biz_storm_started', 10, 'Storm the Heavens')
+
+  // Heavens endings (do not end the run)
+  const heavens = state.heavensEnding
+  if (heavens === 'demonKingDeath') awardStoryMilestoneOnce('heavens_ending_demonKingDeath', 55, 'Heavens: Demon King')
+  if (heavens === 'tartarusEaten') awardStoryMilestoneOnce('heavens_ending_tartarus', 45, 'Heavens: Tartarus')
+
+  // Orthodox true ending chain
+  const oStage = clampNonNegativeInt(state.orthodoxWarStage)
+  if (oStage >= 1) awardStoryMilestoneOnce('orthodox_war_1', 2, 'Orthodox War')
+  if (oStage >= 3) awardStoryMilestoneOnce('orthodox_war_3', 4, 'Orthodox War')
+  if (oStage >= 5) awardStoryMilestoneOnce('orthodox_war_5', 6, 'Orthodox War')
+  if (Boolean(state.orthodoxTrueEndingDone)) awardStoryMilestoneOnce('orthodox_true_ending', 50, 'True Ending')
+
+  // Demon cinematics / endings
+  if (Boolean(state.demonCosmicFinaleDone)) awardStoryMilestoneOnce('demon_cosmic_finale', 80, 'Demonic Finale')
+  const cabin = String(state.demonCabinRevengeStage || '')
+  if (cabin === 'end') awardStoryMilestoneOnce('demon_cabin_end', 20, 'Cabin Betrayal')
+  const dmStage = String(state.dmFate?.stage || '')
+  if (dmStage === 'dead') awardStoryMilestoneOnce('dm_good_self_extinction', 35, 'Self-Extinction')
+  if (dmStage === 'done') awardStoryMilestoneOnce('dm_neutral_blood_price', 25, 'Blood Price')
+
+  // Heavenly Demon detour demon cinematic
+  if (Boolean(state.hdDetour?.demonCinematicResolved)) awardStoryMilestoneOnce('hd_demon_cinematic', 10, 'Heavenly Detour')
 }
 
 function saveMeta() {
   try {
     const meta = {
+      // Identity
+      playerName: (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : '',
+      playerGender: (state.playerGender === 'male' || state.playerGender === 'female') ? state.playerGender : null,
+
       rebirthPoints: clampNonNegativeInt(state.rebirthPoints),
-      rebirthUpgrades: normalizeRebirthUpgrades(state.rebirthUpgrades)
+      bestRebirthPoints: clampNonNegativeInt(state.bestRebirthPoints),
+      rebirthStoneBonusLast: clampNonNegativeInt(state.rebirthStoneBonusLast),
+      rebirthUpgrades: normalizeRebirthUpgrades(state.rebirthUpgrades),
+      bestMajorRealm: {
+        index: clampNonNegativeInt(state.bestMajorRealm?.index),
+        isDemon: Boolean(state.bestMajorRealm?.isDemon),
+        label: String(state.bestMajorRealm?.label || '')
+      }
     }
     localStorage.setItem(META_STORAGE_KEY, JSON.stringify(meta))
   } catch (_) {}
@@ -2242,10 +2588,34 @@ function applyMetaFromStorage() {
     const raw = localStorage.getItem(META_STORAGE_KEY)
     if (!raw) return
     const parsed = JSON.parse(raw)
+
+    // Identity
+    const name = String(parsed?.playerName || '').trim()
+    const gender = parsed?.playerGender
+    if (name) state.playerName = name
+    if (gender === 'male' || gender === 'female') state.playerGender = gender
+
     const pts = clampNonNegativeInt(parsed?.rebirthPoints)
+    const bestPts = clampNonNegativeInt(parsed?.bestRebirthPoints)
+    const bonusLast = clampNonNegativeInt(parsed?.rebirthStoneBonusLast)
     const ups = normalizeRebirthUpgrades(parsed?.rebirthUpgrades)
-    if (!Number.isFinite(state.rebirthPoints) || state.rebirthPoints < pts) state.rebirthPoints = pts
+
+    const best = parsed?.bestMajorRealm
+    const bestIdx = clampNonNegativeInt(best?.index)
+    const bestIsDemon = Boolean(best?.isDemon)
+    const bestLabel = String(best?.label || '')
+
+    // Rebirth points can now go up OR down (due to spirit stone bonus), so meta is authoritative.
+    state.rebirthPoints = pts
+    state.rebirthStoneBonusLast = bonusLast
     state.rebirthUpgrades = normalizeRebirthUpgrades({ ...ups, ...(state.rebirthUpgrades || {}) })
+
+    if (!state.bestMajorRealm || typeof state.bestMajorRealm !== 'object') state.bestMajorRealm = { index: 0, isDemon: false, label: '' }
+    state.bestMajorRealm.index = bestIdx
+    state.bestMajorRealm.isDemon = bestIsDemon
+    state.bestMajorRealm.label = bestLabel
+
+    state.bestRebirthPoints = Math.max(bestPts, clampNonNegativeInt(state.rebirthPoints))
   } catch (_) {}
 }
 
@@ -2254,18 +2624,32 @@ function awardRebirthPoints(points, reasonLabel) {
   if (p <= 0) return
   if (!Number.isFinite(state.rebirthPoints) || state.rebirthPoints < 0) state.rebirthPoints = 0
   state.rebirthPoints += p
+  try { syncBestRebirthPoints() } catch (_) {}
   const r = String(reasonLabel || '').trim()
   log(`Rebirth Points +${formatNumber(p)}${r ? ` (${r})` : ''}. Total: ${formatNumber(state.rebirthPoints)}.`)
   try { saveMeta() } catch (_) {}
 }
 
 window.beginRebirth = () => {
+  // Rebirth keeps the same account (name/gender + meta upgrades/points),
+  // but clears the run save so you return to the Fate Roll screen.
+  try { syncBestMajorRealm() } catch (_) {}
+  try { syncBestRebirthPoints() } catch (_) {}
   try { saveMeta() } catch (_) {}
-  resetGame()
+  try {
+    localStorage.removeItem('cultivationSagaSave')
+    location.reload()
+  } catch (e) {
+    console.error('Failed to rebirth:', e)
+  }
 }
 
 function saveGame() {
   try {
+    try { reconcileRebirthPointsFromStoryProgress() } catch (_) {}
+    try { syncRebirthPointsWithSpiritStoneBonus() } catch (_) {}
+    try { syncBestMajorRealm() } catch (_) {}
+    try { syncBestRebirthPoints() } catch (_) {}
     // Convert Set to array for JSON serialization
     const stateToSave = {
       ...state,
@@ -2288,6 +2672,21 @@ function loadGame() {
       // Restore all state properties
       Object.assign(state, loadedState)
 
+      // Migrate removed herb name: Medicinal Herb -> Ginseng
+      try {
+        if (Array.isArray(state.inventory)) {
+          for (const item of state.inventory) {
+            if (!item || typeof item !== 'object') continue
+            if (String(item.name || '') === 'Medicinal Herb') {
+              item.name = 'Ginseng'
+              if (!item.description) item.description = 'A hardy root used in many formulas.'
+              if (!item.kind) item.kind = 'ingredient'
+              if (!item.imageSrc) item.imageSrc = 'assets/grass.png'
+            }
+          }
+        }
+      } catch (_) {}
+
       // Migrate legacy storyLuck -> luck
       if (Number.isFinite(loadedState.storyLuck)) {
         state.luck = loadedState.storyLuck
@@ -2303,11 +2702,15 @@ function loadGame() {
       if (typeof state.dozeOffUnlocked !== 'boolean') state.dozeOffUnlocked = false
       if (typeof state.demonCabinRevengeStage !== 'string') state.demonCabinRevengeStage = ''
       if (typeof state.runEnded !== 'boolean') state.runEnded = false
+      if (typeof state.hardMode !== 'boolean') state.hardMode = false
+
+      if (!Number.isFinite(state.rebirthStoneBonusLast) || state.rebirthStoneBonusLast < 0) state.rebirthStoneBonusLast = 0
 
       // Rebirth defaults for older saves
       if (!Number.isFinite(state.rebirthPoints) || state.rebirthPoints < 0) state.rebirthPoints = 0
       state.rebirthPoints = Math.floor(state.rebirthPoints)
       state.rebirthUpgrades = normalizeRebirthUpgrades(state.rebirthUpgrades)
+      if (!state.rebirthStoryAwards || typeof state.rebirthStoryAwards !== 'object') state.rebirthStoryAwards = {}
 
       // Orthodox true ending defaults
       if (!Number.isFinite(state.orthodoxWarStage) || state.orthodoxWarStage < 0) state.orthodoxWarStage = 0
@@ -2337,9 +2740,9 @@ function loadGame() {
 
       // Ensure panelPositions exists and has numeric x/y
       if (!state.panelPositions) {
-        state.panelPositions = { stats: { x: 0, y: 0 }, inventory: { x: 0, y: 0 }, actions: { x: 0, y: 0 }, profile: { x: 0, y: 0 }, sect: { x: 0, y: 0 }, quests: { x: 0, y: 0 }, moves: { x: 0, y: 0 }, shop: { x: 0, y: 0 }, conqueredSects: { x: 0, y: 0 }, townShop: { x: 0, y: 0 }, hourShop: { x: 0, y: 0 } }
+        state.panelPositions = { stats: { x: 0, y: 0 }, inventory: { x: 0, y: 0 }, actions: { x: 0, y: 0 }, herbalism: { x: 0, y: 0 }, settings: { x: 0, y: 0 }, recipes: { x: 0, y: 0 }, profile: { x: 0, y: 0 }, sect: { x: 0, y: 0 }, quests: { x: 0, y: 0 }, moves: { x: 0, y: 0 }, shop: { x: 0, y: 0 }, conqueredSects: { x: 0, y: 0 }, townShop: { x: 0, y: 0 }, hourShop: { x: 0, y: 0 } }
       }
-      for (const key of ['stats', 'inventory', 'actions', 'profile', 'sect', 'quests', 'moves', 'shop', 'conqueredSects', 'townShop', 'hourShop']) {
+      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'conqueredSects', 'townShop', 'hourShop']) {
         const p = state.panelPositions[key] || {}
         state.panelPositions[key] = {
           x: Number.isFinite(p.x) ? p.x : 0,
@@ -2360,7 +2763,7 @@ function loadGame() {
       if (!state.panelSizes || typeof state.panelSizes !== 'object') {
         state.panelSizes = {}
       }
-      for (const key of ['stats', 'inventory', 'actions', 'profile', 'sect', 'quests', 'moves', 'shop', 'conqueredSects', 'townShop', 'hourShop']) {
+      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'conqueredSects', 'townShop', 'hourShop']) {
         const s = state.panelSizes[key]
         if (!s || typeof s !== 'object') continue
         const w = Number.isFinite(s.w) ? s.w : undefined
@@ -2379,6 +2782,9 @@ function loadGame() {
 
       // Ensure shops exist for older saves.
       try { ensureShopsState() } catch (_) {}
+
+      // Best-effort: remove any stored emoji icons from loaded saves.
+      try { stripEmojiIconsFromState() } catch (_) {}
 
       if (typeof state.bargainOfferRolled !== 'boolean') state.bargainOfferRolled = false
       if (typeof state.bargainOfferAvailable !== 'boolean') state.bargainOfferAvailable = false
@@ -2482,6 +2888,25 @@ function loadGame() {
         delete state.hasAdvancedManual
       } catch (_) {}
 
+      // Defaults for best-ever progress + leaderboards
+      if (!state.bestMajorRealm || typeof state.bestMajorRealm !== 'object') {
+        state.bestMajorRealm = { index: 0, isDemon: false, label: '' }
+      }
+      if (!Number.isFinite(state.bestMajorRealm.index) || state.bestMajorRealm.index < 0) state.bestMajorRealm.index = 0
+      if (typeof state.bestMajorRealm.label !== 'string') state.bestMajorRealm.label = ''
+      state.bestMajorRealm.isDemon = Boolean(state.bestMajorRealm.isDemon)
+
+      if (!Number.isFinite(state.bestRebirthPoints) || state.bestRebirthPoints < 0) {
+        state.bestRebirthPoints = clampNonNegativeInt(state.rebirthPoints)
+      }
+
+      if (!state.leaderboards || typeof state.leaderboards !== 'object') {
+        state.leaderboards = {
+          major: { rows: [], loading: false, error: '', fetchedAt: 0 },
+          rebirth: { rows: [], loading: false, error: '', fetchedAt: 0 }
+        }
+      }
+
       // Demon encounter branch defaults
       if (typeof state.fledDemon !== 'boolean') state.fledDemon = false
       if (typeof state.joinedOrthodoxSect !== 'boolean') state.joinedOrthodoxSect = false
@@ -2576,11 +3001,16 @@ function loadGame() {
       // Apply meta storage (survives hard resets)
       try { applyMetaFromStorage() } catch (_) {}
 
+      // Sync rebirth points to current spirit stones immediately.
+      try { syncRebirthPointsWithSpiritStoneBonus() } catch (_) {}
+
     // If there's no save, still apply meta storage so rebirth persists across runs.
     try {
       if (!Number.isFinite(state.rebirthPoints) || state.rebirthPoints < 0) state.rebirthPoints = 0
+      if (!Number.isFinite(state.rebirthStoneBonusLast) || state.rebirthStoneBonusLast < 0) state.rebirthStoneBonusLast = 0
       state.rebirthUpgrades = normalizeRebirthUpgrades(state.rebirthUpgrades)
       applyMetaFromStorage()
+      try { syncRebirthPointsWithSpiritStoneBonus() } catch (_) {}
     } catch (_) {}
       if (typeof state.hasLargerBagSpace !== 'boolean') state.hasLargerBagSpace = false
       if (typeof state.largerBagSpaceUnlocked !== 'boolean') state.largerBagSpaceUnlocked = false
@@ -2709,7 +3139,50 @@ let __audioMaster = null
 let __audioSfx = null
 let __audioMusic = null
 let __audioMusicNodes = null
+let __audioMusicMode = ''
 let __audioInitBound = false
+
+const __emojiRegex = (() => {
+  try { return new RegExp('\\p{Extended_Pictographic}', 'u') } catch (_) { return null }
+})()
+
+function __stringHasEmoji(s) {
+  if (!__emojiRegex) return false
+  try { return __emojiRegex.test(String(s || '')) } catch (_) { return false }
+}
+
+function stripEmojiIconsFromState() {
+  // Best-effort cleanup so we don't render any emoji-based icons anywhere.
+  try {
+    if (Array.isArray(state.inventory)) {
+      for (const it of state.inventory) {
+        if (it && typeof it === 'object' && typeof it.icon === 'string' && __stringHasEmoji(it.icon)) it.icon = ''
+      }
+    }
+  } catch (_) {}
+
+  try {
+    if (Array.isArray(state.repeatableActions)) {
+      for (const a of state.repeatableActions) {
+        if (a && typeof a === 'object' && typeof a.icon === 'string' && __stringHasEmoji(a.icon)) a.icon = ''
+      }
+    }
+  } catch (_) {}
+
+  try {
+    if (Array.isArray(state.specialActions)) {
+      for (const a of state.specialActions) {
+        if (a && typeof a === 'object' && typeof a.icon === 'string' && __stringHasEmoji(a.icon)) a.icon = ''
+      }
+    }
+  } catch (_) {}
+
+  try {
+    if (state.enemy && typeof state.enemy === 'object' && typeof state.enemy.icon === 'string' && __stringHasEmoji(state.enemy.icon)) {
+      state.enemy.icon = ''
+    }
+  } catch (_) {}
+}
 
 function ensureAudioState() {
   if (!state.audio || typeof state.audio !== 'object') {
@@ -2795,6 +3268,9 @@ function playSfx(kind) {
   else if (k === 'hit') { type = 'square'; f0 = 160; f1 = 120; dur = 0.06; peak = 0.12 }
   else if (k === 'buy') { type = 'sine'; f0 = 740; f1 = 980; dur = 0.11; peak = 0.14 }
   else if (k === 'error') { type = 'sawtooth'; f0 = 220; f1 = 140; dur = 0.11; peak = 0.10 }
+  else if (k === 'gather') { type = 'triangle'; f0 = 380; f1 = 620; dur = 0.09; peak = 0.12 }
+  else if (k === 'craft') { type = 'sine'; f0 = 520; f1 = 1040; dur = 0.12; peak = 0.14 }
+  else if (k === 'rebirth') { type = 'triangle'; f0 = 440; f1 = 1320; dur = 0.14; peak = 0.16 }
 
   osc.type = type
   osc.frequency.setValueAtTime(f0, t0)
@@ -2823,6 +3299,7 @@ function stopAmbientMusic() {
     }
   } catch (_) {}
   __audioMusicNodes = null
+  __audioMusicMode = ''
 }
 
 function ensureAmbientMusic() {
@@ -2835,29 +3312,63 @@ function ensureAmbientMusic() {
   const ctx = ensureAudioContext()
   if (!ctx || !__audioMusic) return
   syncAudioGains()
-  if (__audioMusicNodes) return
 
-  // Very simple evolving pad: two detuned sines + slow LFO on gain.
+  const mode = (state.phase === 'COMBAT')
+    ? 'combat'
+    : (state.phase === 'FATE_ROLL')
+      ? 'fate'
+      : 'calm'
+
+  if (__audioMusicNodes && __audioMusicMode === mode) return
+  if (__audioMusicNodes && __audioMusicMode !== mode) stopAmbientMusic()
+  __audioMusicMode = mode
+
+  // Lightweight procedural “soundtrack” modes.
   const t0 = ctx.currentTime
-  const base = 110
+  const base = (mode === 'combat') ? 82 : (mode === 'fate') ? 132 : 110
 
+  const gain = ctx.createGain(); gain.gain.setValueAtTime(0.12, t0)
+  gain.connect(__audioMusic)
+
+  // Common LFO for gentle movement.
+  const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime(mode === 'combat' ? 0.35 : 0.08, t0)
+  const lfoGain = ctx.createGain(); lfoGain.gain.setValueAtTime(mode === 'combat' ? 0.10 : 0.18, t0)
+  lfo.connect(lfoGain)
+  lfoGain.connect(gain.gain)
+
+  // Pad layer.
   const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.setValueAtTime(base * 2, t0)
   const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.setValueAtTime(base * 3, t0)
-  const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime(0.07, t0)
-  const lfoGain = ctx.createGain(); lfoGain.gain.setValueAtTime(0.18, t0)
-  const padGain = ctx.createGain(); padGain.gain.setValueAtTime(0.14, t0)
+  o2.detune.setValueAtTime(mode === 'fate' ? 18 : 8, t0)
+  o1.connect(gain)
+  o2.connect(gain)
 
-  lfo.connect(lfoGain)
-  lfoGain.connect(padGain.gain)
-  o1.connect(padGain)
-  o2.connect(padGain)
-  padGain.connect(__audioMusic)
+  let extraNodes = []
+  if (mode === 'combat') {
+    // Add a subtle bass pulse.
+    const bass = ctx.createOscillator(); bass.type = 'square'; bass.frequency.setValueAtTime(base, t0)
+    const bassGain = ctx.createGain(); bassGain.gain.setValueAtTime(0.06, t0)
+    bass.connect(bassGain)
+    bassGain.connect(gain)
+    extraNodes.push(bass, bassGain)
+  } else if (mode === 'fate') {
+    // Add a faint shimmer.
+    const sh = ctx.createOscillator(); sh.type = 'triangle'; sh.frequency.setValueAtTime(base * 5, t0)
+    const shGain = ctx.createGain(); shGain.gain.setValueAtTime(0.045, t0)
+    sh.detune.setValueAtTime(22, t0)
+    sh.connect(shGain)
+    shGain.connect(gain)
+    extraNodes.push(sh, shGain)
+  }
 
   o1.start(t0)
   o2.start(t0)
   lfo.start(t0)
+  for (const n of extraNodes) {
+    if (n && typeof n.start === 'function') n.start(t0)
+  }
 
-  __audioMusicNodes = [o1, o2, lfo, lfoGain, padGain]
+  __audioMusicNodes = [o1, o2, lfo, lfoGain, gain, ...extraNodes]
 }
 
 window.setAudioEnabled = (enabled) => {
@@ -3012,6 +3523,7 @@ window.confirmIntroUsername = function() {
   }
   state.playerName = name
   state.intro.step = 'gender'
+  try { saveGame() } catch (_) {}
   render()
 }
 
@@ -3055,7 +3567,158 @@ window.introContinue = function() {
   rollFate()
   state.phase = 'FATE_ROLL'
   saveGame()
+  try { leaderboardScheduleSync('intro') } catch (_) {}
   render()
+}
+
+// ============================================================================
+// GLOBAL LEADERBOARDS (Supabase REST)
+// ============================================================================
+let __leaderboardSyncTimer = null
+let __leaderboardLastSent = { username: '', rp: -1, bestRp: -1, bestMajor: -1, bestMajorIsDemon: null }
+
+function getLeaderboardPlayerPayload() {
+  const username = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : ''
+  const rp = clampNonNegativeInt(state.rebirthPoints)
+  const bestRp = clampNonNegativeInt(state.bestRebirthPoints)
+  const bm = state.bestMajorRealm && typeof state.bestMajorRealm === 'object' ? state.bestMajorRealm : { index: 0, isDemon: false, label: '' }
+  const bestMajorIndex = clampNonNegativeInt(bm.index)
+  const bestMajorIsDemon = Boolean(bm.isDemon)
+  const bestMajorLabel = String(bm.label || '')
+  return {
+    username,
+    rebirth_points: rp,
+    best_rebirth_points: bestRp,
+    best_major_index: bestMajorIndex,
+    best_major_is_demon: bestMajorIsDemon,
+    best_major_label: bestMajorLabel
+  }
+}
+
+async function leaderboardUpsertNow() {
+  if (!isLeaderboardConfigured()) return false
+  const payload = getLeaderboardPlayerPayload()
+  if (!payload.username) return false
+
+  // Avoid spamming the backend if nothing meaningful changed.
+  const last = __leaderboardLastSent
+  const same = last.username === payload.username
+    && last.rp === payload.rebirth_points
+    && last.bestRp === payload.best_rebirth_points
+    && last.bestMajor === payload.best_major_index
+    && last.bestMajorIsDemon === payload.best_major_is_demon
+  if (same) return true
+
+  const cfg = getLeaderboardConfig()
+  const url = `${cfg.url.replace(/\/+$/, '')}/rest/v1/leaderboard?on_conflict=username`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': cfg.anonKey,
+      'Authorization': `Bearer ${cfg.anonKey}`,
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    },
+    body: JSON.stringify(payload)
+  })
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`Leaderboard upsert failed (${res.status}): ${txt || res.statusText}`)
+  }
+
+  __leaderboardLastSent = {
+    username: payload.username,
+    rp: payload.rebirth_points,
+    bestRp: payload.best_rebirth_points,
+    bestMajor: payload.best_major_index,
+    bestMajorIsDemon: payload.best_major_is_demon
+  }
+  return true
+}
+
+function leaderboardScheduleSync(reason) {
+  // Debounce so we don't hammer the backend during rapid saves.
+  if (!isLeaderboardConfigured()) return
+  if (state.phase === 'INTRO_LOADING') return
+  const r = String(reason || '').trim()
+
+  if (r) {
+    // no-op: useful for debugging
+  }
+
+  if (__leaderboardSyncTimer) {
+    try { clearTimeout(__leaderboardSyncTimer) } catch (_) {}
+  }
+  __leaderboardSyncTimer = setTimeout(async () => {
+    __leaderboardSyncTimer = null
+    try {
+      await leaderboardUpsertNow()
+    } catch (e) {
+      // Do not crash the game if the leaderboard is misconfigured.
+      console.warn(String(e && e.message ? e.message : e))
+    }
+  }, 1500)
+}
+
+async function leaderboardFetch(kind) {
+  const k = String(kind || '')
+  if (!isLeaderboardConfigured()) {
+    throw new Error('Leaderboards are not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).')
+  }
+  const cfg = getLeaderboardConfig()
+  const base = `${cfg.url.replace(/\/+$/, '')}/rest/v1/leaderboard`
+  const select = 'select=username,rebirth_points,best_rebirth_points,best_major_index,best_major_is_demon,best_major_label'
+
+  let order = 'order=best_major_index.desc'
+  if (k === 'rebirth') order = 'order=best_rebirth_points.desc'
+
+  const url = `${base}?${select}&${order}&limit=25`
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'apikey': cfg.anonKey,
+      'Authorization': `Bearer ${cfg.anonKey}`
+    }
+  })
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`Leaderboard fetch failed (${res.status}): ${txt || res.statusText}`)
+  }
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+window.refreshLeaderboards = async () => {
+  // Safe to call even if panel is closed.
+  if (!state.leaderboards || typeof state.leaderboards !== 'object') return
+  state.leaderboards.major.loading = true
+  state.leaderboards.rebirth.loading = true
+  state.leaderboards.major.error = ''
+  state.leaderboards.rebirth.error = ''
+  render()
+
+  try {
+    const [maj, reb] = await Promise.all([
+      leaderboardFetch('major'),
+      leaderboardFetch('rebirth')
+    ])
+    state.leaderboards.major.rows = maj
+    state.leaderboards.rebirth.rows = reb
+    const now = Date.now()
+    state.leaderboards.major.fetchedAt = now
+    state.leaderboards.rebirth.fetchedAt = now
+  } catch (e) {
+    const msg = String(e && e.message ? e.message : e)
+    state.leaderboards.major.error = msg
+    state.leaderboards.rebirth.error = msg
+  } finally {
+    state.leaderboards.major.loading = false
+    state.leaderboards.rebirth.loading = false
+    render()
+  }
 }
 
 function renderIntroLoading(container) {
@@ -3154,36 +3817,70 @@ function resetGame() {
 // FATE ROLL SYSTEM
 // ============================================================================
 function rollFate() {
+  // Keep rebirth upgrade state normalized.
+  state.rebirthUpgrades = normalizeRebirthUpgrades(state.rebirthUpgrades)
+
+  const up = state.rebirthUpgrades
+  const bloodlineLuckMult = 1 + clampNonNegativeInt(up.bloodlineLuckLevel)
+  const rootLuckLvl = clampNonNegativeInt(up.rootLuckLevel)
+  const maxRootsBonusLvl = clampNonNegativeInt(up.maxRootBonusLevel)
+  const multiAffinityLuckLvl = clampNonNegativeInt(up.multiAffinityLuckLevel)
+  const alignLuckLvl = clampNonNegativeInt(up.affinityAlignmentLuckLevel)
+  const storyLuckLvl = clampNonNegativeInt(up.storyLuckLuckLevel)
+
   // Apply bloodline bias from rebirth upgrades
   const biasedBloodlines = BLOODLINES.map(b => {
     const rebirthBias = b.tier <= 3 ? (1 + state.rebirthUpgrades.bloodlineBias) : 1
     const tierRarity = getBloodlineWeightMultiplier(b.tier)
+    const luckMult = b.tier <= 3 ? bloodlineLuckMult : 1
     return {
       ...b,
-      weight: b.weight * rebirthBias * tierRarity
+      weight: b.weight * rebirthBias * tierRarity * luckMult
     }
   })
   
   state.bloodline = weightedRandom(biasedBloodlines)
   
   // Roll spiritual roots with min/max constraints
-  const validRoots = SPIRITUAL_ROOTS.filter(r => 
-    r.count >= state.rebirthUpgrades.minRootCount &&
-    r.count <= state.rebirthUpgrades.maxRootCount
+  const effectiveMinRoots = clampNonNegativeInt(state.rebirthUpgrades.minRootCount)
+    + clampNonNegativeInt(state.rebirthUpgrades.minRootBonusLevel)
+  const effectiveMaxRoots = Math.max(
+    effectiveMinRoots,
+    clampNonNegativeInt(state.rebirthUpgrades.maxRootCount) + maxRootsBonusLvl
   )
-  
+  const validRoots = SPIRITUAL_ROOTS
+    .filter(r => r.count >= effectiveMinRoots && r.count <= effectiveMaxRoots)
+    .map(r => {
+      const count = clampNonNegativeInt(r.count)
+      const bonus = Math.max(0, count - 1)
+      const luck = 1 + (rootLuckLvl * bonus)
+      return { ...r, weight: clampNonNegativeNumber(r.weight) * luck }
+    })
+
   state.spiritualRoots = weightedRandom(validRoots)
   
-  // Roll luck (1-100)
-  state.luck = Math.floor(Math.random() * 100) + 1
+  // Roll story luck (1-100). Each purchase adds +5% chance to roll higher.
+  const baseLuck = Math.floor(Math.random() * 100) + 1
+  const storyBoostChance = Math.max(0, Math.min(1, 0.05 * storyLuckLvl))
+  const boostedLuck = Math.floor(Math.random() * 100) + 1
+  state.luck = (Math.random() < storyBoostChance) ? Math.max(baseLuck, boostedLuck) : baseLuck
   
   // Roll affinities (1-5 affinities, weighted toward fewer)
-  const affinityCount = weightedRandom(AFFINITY_COUNT_WEIGHTS).count
+  const affinityWeights = AFFINITY_COUNT_WEIGHTS.map(o => {
+    const count = clampNonNegativeInt(o.count)
+    const luck = 1 + (multiAffinityLuckLvl * Math.max(0, count - 1))
+    return { ...o, weight: clampNonNegativeNumber(o.weight) * luck }
+  })
+  const affinityCount = weightedRandom(affinityWeights).count
   state.affinities = []
   const shuffledAffinities = [...AFFINITIES].sort(() => Math.random() - 0.5)
   
   for (let i = 0; i < affinityCount; i++) {
-    const score = Math.floor(Math.random() * 50) + 1
+    // Each purchase adds +1% chance to roll higher alignment (higher score).
+    const highChance = Math.max(0, Math.min(0.95, 0.01 * alignLuckLvl))
+    const score = (Math.random() < highChance)
+      ? (Math.floor(Math.random() * 25) + 26) // 26..50
+      : (Math.floor(Math.random() * 50) + 1)  // 1..50
     state.affinities.push({
       type: shuffledAffinities[i],
       score: score
@@ -3362,21 +4059,21 @@ function calculateQiGain(baseQi) {
   const safeRealmQiMult = Math.max(1.1, realmQiMult)
   const sectQi = Number.isFinite(state.sectMultipliers?.qi) ? state.sectMultipliers.qi : 1
   const demonAsc = state.demonCorruptionAscended ? 2.5 : 1
-  return baseQi * state.bloodline.qiMult * state.spiritualRoots.qiMult * safeRealmQiMult * state.qiMultiplier * sectQi * demonAsc
+  return baseQi * state.bloodline.qiMult * state.spiritualRoots.qiMult * safeRealmQiMult * (state.qiMultiplier || 1) * getRebirthQiMultiplier() * sectQi * demonAsc
 }
 
 function calculateStrength() {
   const realm = getCurrentCultivationRealm()
   const sectStr = Number.isFinite(state.sectMultipliers?.str) ? state.sectMultipliers.str : 1
   const demonAsc = state.demonCorruptionAscended ? 2.5 : 1
-  return Math.floor(10 * state.bloodline.strMult * realm.data.strMult * sectStr * demonAsc)
+  return Math.floor(10 * state.bloodline.strMult * realm.data.strMult * sectStr * demonAsc * getRebirthStrengthMultiplier())
 }
 
 function calculateMaxHealth() {
   const realm = getCurrentCultivationRealm()
   const sectHp = Number.isFinite(state.sectMultipliers?.hp) ? state.sectMultipliers.hp : 1
   const demonAsc = state.demonCorruptionAscended ? 2.5 : 1
-  return Math.floor(100 * state.bloodline.hpMult * realm.data.hpMult * sectHp * demonAsc)
+  return Math.floor(100 * state.bloodline.hpMult * realm.data.hpMult * sectHp * demonAsc * getRebirthHealthMultiplier())
 }
 
 function addCorruptionPercent(amount, sourceLabel) {
@@ -3527,7 +4224,7 @@ function renderCultivationInfo() {
                 <div class="cultivation-box-row"><span>MANUAL TIER:</span><span>${formatNumber(state.manualTier || 0)}%</span></div>
                 <div class="cultivation-box-row"><span>REALM:</span><span>${formatMultiplier(safeRealmQiMult)}</span></div>
                 <div class="cultivation-box-row"><span>BLOODLINE:</span><span>${formatMultiplier(state.bloodline?.qiMult || 1)}</span></div>
-                <div class="cultivation-box-row"><span>QI BONUS:</span><span>${formatMultiplier(state.qiMultiplier || 1)}</span></div>
+                <div class="cultivation-box-row"><span>QI BONUS:</span><span>${formatMultiplier((state.qiMultiplier || 1) * getRebirthQiMultiplier())}</span></div>
                 <div class="cultivation-box-row"><span>SECT MANUAL:</span><span>${formatMultiplier(sectQi)}</span></div>
               </div>
               <div class="cultivation-box-total">TOTAL: ${formatMultiplier(totalQiMult)}</div>
@@ -3615,7 +4312,13 @@ function getInventoryItemImageSrc(item) {
     'Normal Axe': 'assets/silver-axe.png',
     'Legendary Axe': 'assets/thunder-axe.png',
     'Mysterious Herb': 'assets/grass.png',
-    'Medicinal Herb': 'assets/grass.png',
+    'Ginseng': 'assets/grass.png',
+    'Spirit Grass': 'assets/grass.png',
+    'Bloody Root': 'assets/grass.png',
+    'Snow Lotus': 'assets/grass.png',
+    'Jade Leaf': 'assets/grass.png',
+    'Moonflower': 'assets/grass.png',
+    'Dragonwort': 'assets/grass.png',
     'Herb Pill': 'assets/herb_pill.png',
     'Qi Gathering Pill': 'assets/qi_pill.png'
   }
@@ -3629,7 +4332,6 @@ function getInventoryItemBonuses(item) {
   if (name === 'Legendary Axe') return ['Silver gained from selling wood: +70%']
   if (name === 'Mysterious Herb') return ['Qi gain: +20%']
   if (name === 'Qi Gathering Pill') return ['Use: Instantly grants 500 Qi']
-  if (name === 'Medicinal Herb') return ['Use: Instantly grants 5 Qi']
   if (item?.kind === 'pill' || name === 'Herb Pill') {
     const pillFile = String(item?.pillFile || '')
 
@@ -3661,7 +4363,7 @@ function getInventoryEquipSlot(item) {
 
 function canUseInventoryItem(item) {
   const name = String(item?.name || '')
-  return name === 'Qi Gathering Pill' || name === 'Mysterious Herb' || name === 'Medicinal Herb' || name === 'Herb Pill' || item?.kind === 'pill'
+  return name === 'Qi Gathering Pill' || name === 'Mysterious Herb' || name === 'Herb Pill' || item?.kind === 'pill'
 }
 
 function applyEquipmentEffects() {
@@ -3803,9 +4505,6 @@ window.useInventoryItem = (index) => {
   } else if (name === 'Mysterious Herb') {
     state.qiMultiplier = 1.2
     log('You consume the Mysterious Herb. Qi gain permanently increased by 20%!')
-  } else if (name === 'Medicinal Herb') {
-    state.qi = (Number(state.qi) || 0) + 5
-    log('You consume a Medicinal Herb. +5 Qi.')
   }
 
   const q = Number(item.quantity) || 1
@@ -3830,6 +4529,9 @@ window.useInventoryItem = (index) => {
 function render() {
   // Preserve log scroll position across full screen re-renders.
   captureLogScrollState()
+
+  // Keep spirit-stone rebirth-point bonus applied in real time.
+  try { syncRebirthPointsWithSpiritStoneBonus() } catch (_) {}
 
   const app = document.getElementById('app')
 
@@ -3940,6 +4642,14 @@ function render() {
     if (modal) {
       modal.remove()
     }
+  }
+
+  // Render rebirth node modal if needed
+  if (state.showRebirthNodeModal) {
+    renderRebirthNodeModal()
+  } else {
+    const modal = document.getElementById('rebirth-node-modal')
+    if (modal) modal.remove()
   }
 }
 
@@ -4077,6 +4787,577 @@ function renderResetModal() {
   }, 100)
 }
 
+function getRebirthNodeIconSrc(nodeId) {
+  const id = String(nodeId || '')
+  const map = {
+    start: 'assets/ying_yang_pill.png',
+    reroll: 'assets/Orthodox_manual.png',
+    bias1: 'assets/gold-coin.png',
+    bias2: 'assets/silver-coin.png',
+    bias3: 'assets/copper-coin.png',
+    min2: 'assets/grass.png',
+    min3: 'assets/grass-manual.png',
+    max6: 'assets/rock.png',
+    max7: 'assets/space.png',
+    reset: 'assets/breakthrough_pill.png',
+    qi_mult: 'assets/ki.png',
+
+    herb_speed: 'assets/grass.png',
+    herb_multi: 'assets/spiritstone-low.png',
+    auto_gather: 'assets/rusted-pickaxe.png',
+    auto_craft: 'assets/herb_pill.png',
+    pill_speed: 'assets/qi_pill.png',
+
+    str_mult: 'assets/gold-sword.png',
+    hp_mult: 'assets/iron_body_pill.png',
+    special_cd: 'assets/battery.png',
+    repeat_speed: 'assets/rusted-axe.png',
+
+    min_roots_plus: 'assets/grass-manual.png',
+
+    root_luck: 'assets/space.png',
+    max_roots_plus: 'assets/rock.png',
+    more_rerolls: 'assets/Orthodox_manual.png',
+    bloodline_luck: 'assets/gold-coin.png',
+    multi_affinity_luck: 'assets/ki.png',
+    affinity_alignment: 'assets/Pentagram.png',
+    story_luck: 'assets/battery.png',
+    spiritstone_rp: 'assets/spiritstone-high.png',
+    quest_drop: 'assets/gold-sword.png'
+  }
+  return map[id] || 'assets/qi_pill.png'
+}
+
+function getRebirthNodeDefinition(nodeId) {
+  const id = String(nodeId || '')
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+
+  const resetProgress = clampNonNegativeInt(u.resetUnlockProgress)
+  const resetNext = Math.min(100, resetProgress + 10)
+  const resetCost = 5
+
+  const qiLvl = getRebirthQiMultiplierLevel()
+  const qiMult = getRebirthQiMultiplier()
+  const qiCost = getRebirthQiMultiplierNextCost()
+
+  const herbSpeedLvl = clampNonNegativeInt(u.herbGatherSpeedLevel)
+  const herbSpeedPct = herbSpeedLvl * 5
+  const herbSpeedCost = getRebirthInfiniteNodeCost(herbSpeedLvl)
+
+  const herbMultiLvl = clampNonNegativeInt(u.herbMultiGatherLevel)
+  const herbMultiPct = herbMultiLvl * 10
+  const herbsPerGather = 1 + Math.floor(herbMultiLvl / 10)
+  const herbMultiCost = getRebirthInfiniteNodeCost(herbMultiLvl)
+
+  const strLvl = clampNonNegativeInt(u.strengthMultiplierLevel)
+  const strMult = 1 + (0.1 * strLvl)
+  const strCost = getRebirthInfiniteNodeCost(strLvl)
+
+  const hpLvl = clampNonNegativeInt(u.healthMultiplierLevel)
+  const hpMult = 1 + (0.1 * hpLvl)
+  const hpCost = getRebirthInfiniteNodeCost(hpLvl)
+
+  const specialLvl = clampNonNegativeInt(u.specialCooldownLevel)
+  const specialCdRed = 0.5 * specialLvl
+  const specialCost = getRebirthInfiniteNodeCost(specialLvl)
+
+  const repeatLvl = clampNonNegativeInt(u.repeatableSpeedLevel)
+  const repeatRed = 0.25 * repeatLvl
+  const repeatCost = getRebirthInfiniteNodeCost(repeatLvl)
+
+  const autoGatherLvl = clampNonNegativeInt(u.autoGatherLevel)
+  const autoGatherPct = autoGatherLvl * 5
+  const autoGatherUnlocked = autoGatherPct >= 100
+  const autoGatherCost = getRebirthInfiniteNodeCost(autoGatherLvl)
+
+  const autoCraftLvl = clampNonNegativeInt(u.autoCraftLevel)
+  const autoCraftPct = autoCraftLvl * 5
+  const autoCraftUnlocked = autoCraftPct >= 100
+  const autoCraftCost = getRebirthInfiniteNodeCost(autoCraftLvl)
+
+  const pillSpeedLvl = clampNonNegativeInt(u.pillCraftSpeedLevel)
+  const pillRed = 0.25 * pillSpeedLvl
+  const pillSpeedCost = getRebirthInfiniteNodeCost(pillSpeedLvl)
+
+  const minRootsLvl = clampNonNegativeInt(u.minRootBonusLevel)
+  const minRootsCost = getRebirthInfiniteNodeCost(minRootsLvl)
+  const effectiveMinRoots = clampNonNegativeInt(u.minRootCount) + minRootsLvl
+
+  const rootLuckLvl = clampNonNegativeInt(u.rootLuckLevel)
+  const rootLuckCost = getRebirthInfiniteNodeCost(rootLuckLvl)
+
+  const maxRootsBonusLvl = clampNonNegativeInt(u.maxRootBonusLevel)
+  const maxRootsBonusCost = getRebirthInfiniteNodeCost(maxRootsBonusLvl)
+  const effectiveMaxRoots = Math.max(effectiveMinRoots, clampNonNegativeInt(u.maxRootCount) + maxRootsBonusLvl)
+
+  const moreRerollsLvl = clampNonNegativeInt(u.extraRerollsLevel)
+  const moreRerollsCost = getRebirthInfiniteNodeCost(moreRerollsLvl)
+
+  const bloodlineLuckLvl = clampNonNegativeInt(u.bloodlineLuckLevel)
+  const bloodlineLuckCost = getRebirthInfiniteNodeCost(bloodlineLuckLvl)
+
+  const multiAffinityLuckLvl = clampNonNegativeInt(u.multiAffinityLuckLevel)
+  const multiAffinityLuckCost = getRebirthInfiniteNodeCost(multiAffinityLuckLvl)
+
+  const alignLuckLvl = clampNonNegativeInt(u.affinityAlignmentLuckLevel)
+  const alignLuckCost = getRebirthInfiniteNodeCost(alignLuckLvl)
+
+  const storyLuckLvl = clampNonNegativeInt(u.storyLuckLuckLevel)
+  const storyLuckCost = getRebirthInfiniteNodeCost(storyLuckLvl)
+
+  const stoneRpLvl = clampNonNegativeInt(u.spiritStoneRpMultLevel)
+  const stoneRpMult = getRebirthSpiritStoneRpMultiplier()
+  const stoneRpCost = getRebirthInfiniteNodeCost(stoneRpLvl, 3)
+
+  const questDropLvl = clampNonNegativeInt(u.questDropChanceLevel)
+  const questDropPct = questDropLvl * 1
+  const questDropCost = getRebirthInfiniteNodeCost(questDropLvl)
+
+  const defs = {
+    start: {
+      id: 'start',
+      name: 'Rebirth',
+      description: 'The origin of your fate blessings.',
+      cost: 0,
+      prereq: [],
+      purchased: true,
+      canBuy: () => false
+    },
+    qi_mult: {
+      id: 'qi_mult',
+      name: 'Qi Multiplier',
+      description: `Permanently increases your Qi gain multiplier. Current: ${formatMultiplier(qiMult)} (level ${qiLvl}). Each purchase adds +0.2×.`,
+      cost: qiCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => {
+        const next = getRebirthQiMultiplierLevel() + 1
+        u.qiMultiplierLevel = Math.max(u.qiMultiplierLevel, next)
+      },
+      levelText: () => `Level: ${qiLvl}`,
+      nextText: () => `Next: ${formatMultiplier(1 + 0.2 * (qiLvl + 1))}`
+    },
+
+    herb_speed: {
+      id: 'herb_speed',
+      name: 'Faster Herb Gathering',
+      description: `Herb gathering becomes faster. Current: +${formatNumber(herbSpeedPct)}% (level ${herbSpeedLvl}). Each purchase adds +5%.`,
+      cost: herbSpeedCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.herbGatherSpeedLevel = herbSpeedLvl + 1 },
+      levelText: () => `Speed: +${formatNumber(herbSpeedPct)}%`,
+      nextText: () => `Next: +${formatNumber(herbSpeedPct + 5)}%`
+    },
+    herb_multi: {
+      id: 'herb_multi',
+      name: 'Gather Multiple Herbs',
+      description: `Increases the number of herbs gathered per completion. Current: +${formatNumber(herbMultiPct)}% (level ${herbMultiLvl}) → ${formatNumber(herbsPerGather)} herb(s)/gather. Each purchase adds +10%. At 100% you gather 2, at 200% you gather 3, etc.`,
+      cost: herbMultiCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.herbMultiGatherLevel = herbMultiLvl + 1 },
+      levelText: () => `Per gather: ${formatNumber(herbsPerGather)} herb(s)`,
+      nextText: () => `Next: +${formatNumber(herbMultiPct + 10)}%`
+    },
+    auto_gather: {
+      id: 'auto_gather',
+      name: 'Auto Gather Herbs',
+      description: `Progress: ${formatNumber(autoGatherPct)}% (level ${autoGatherLvl}). Each purchase adds +5%. At 100% you unlock Auto Gather. Faster gathering + multi-gather apply to auto gather.`,
+      cost: autoGatherCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.autoGatherLevel = autoGatherLvl + 1 },
+      levelText: () => autoGatherUnlocked ? 'Status: UNLOCKED' : `Status: LOCKED (${formatNumber(autoGatherPct)}%)`,
+      nextText: () => `Next: ${formatNumber(autoGatherPct + 5)}%`
+    },
+    auto_craft: {
+      id: 'auto_craft',
+      name: 'Auto Pill Crafting',
+      description: `Progress: ${formatNumber(autoCraftPct)}% (level ${autoCraftLvl}). Each purchase adds +5%. At 100% you unlock Auto Craft and can select a pill to craft automatically.`,
+      cost: autoCraftCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.autoCraftLevel = autoCraftLvl + 1 },
+      levelText: () => autoCraftUnlocked ? 'Status: UNLOCKED' : `Status: LOCKED (${formatNumber(autoCraftPct)}%)`,
+      nextText: () => `Next: ${formatNumber(autoCraftPct + 5)}%`
+    },
+    pill_speed: {
+      id: 'pill_speed',
+      name: 'Faster Pill Crafting',
+      description: `Reduces pill crafting time. Current: -${pillRed.toFixed(2)}s (level ${pillSpeedLvl}). Each purchase reduces by 0.25s. Applies to auto crafting.`,
+      cost: pillSpeedCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.pillCraftSpeedLevel = pillSpeedLvl + 1 },
+      levelText: () => `Craft time: -${pillRed.toFixed(2)}s`,
+      nextText: () => `Next: -${(pillRed + 0.25).toFixed(2)}s`
+    },
+
+    str_mult: {
+      id: 'str_mult',
+      name: 'Strength Multiplier',
+      description: `Permanently increases Strength. Current: ${formatMultiplier(strMult)} (level ${strLvl}). Each purchase adds +0.1×.`,
+      cost: strCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.strengthMultiplierLevel = strLvl + 1 },
+      levelText: () => `Strength: ${formatMultiplier(strMult)}`,
+      nextText: () => `Next: ${formatMultiplier(1 + 0.1 * (strLvl + 1))}`
+    },
+    hp_mult: {
+      id: 'hp_mult',
+      name: 'Health Multiplier',
+      description: `Permanently increases Max Health. Current: ${formatMultiplier(hpMult)} (level ${hpLvl}). Each purchase adds +0.1×.`,
+      cost: hpCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.healthMultiplierLevel = hpLvl + 1 },
+      levelText: () => `Health: ${formatMultiplier(hpMult)}`,
+      nextText: () => `Next: ${formatMultiplier(1 + 0.1 * (hpLvl + 1))}`
+    },
+    special_cd: {
+      id: 'special_cd',
+      name: 'Faster Special Action Cooldowns',
+      description: `Reduces special action cooldowns. Current: -${specialCdRed.toFixed(1)}s (level ${specialLvl}). Each purchase reduces by 0.5s.`,
+      cost: specialCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.specialCooldownLevel = specialLvl + 1 },
+      levelText: () => `Cooldowns: -${specialCdRed.toFixed(1)}s`,
+      nextText: () => `Next: -${(specialCdRed + 0.5).toFixed(1)}s`
+    },
+    repeat_speed: {
+      id: 'repeat_speed',
+      name: 'Faster Repeatable Actions',
+      description: `Repeatable actions complete faster. Current: -${repeatRed.toFixed(2)}s (level ${repeatLvl}). Each purchase reduces by 0.25s.`,
+      cost: repeatCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.repeatableSpeedLevel = repeatLvl + 1 },
+      levelText: () => `Duration: -${repeatRed.toFixed(2)}s`,
+      nextText: () => `Next: -${(repeatRed + 0.25).toFixed(2)}s`
+    },
+
+    min_roots_plus: {
+      id: 'min_roots_plus',
+      name: 'Increase Minimum Roots',
+      description: `Increases the minimum spiritual roots you can roll. Current bonus: +${formatNumber(minRootsLvl)} (effective min ${formatNumber(effectiveMinRoots)}). Each purchase adds +1.`,
+      cost: minRootsCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.minRootBonusLevel = minRootsLvl + 1 },
+      levelText: () => `Bonus: +${formatNumber(minRootsLvl)}`,
+      nextText: () => `Next bonus: +${formatNumber(minRootsLvl + 1)}`
+    },
+
+    root_luck: {
+      id: 'root_luck',
+      name: 'Increase Root Luck',
+      description: `Increases your luck of rolling more spiritual roots within your min/max range. Current: +${formatNumber(rootLuckLvl)} luck (level ${rootLuckLvl}). Each purchase adds +1.`,
+      cost: rootLuckCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.rootLuckLevel = rootLuckLvl + 1 },
+      levelText: () => `Luck: +${formatNumber(rootLuckLvl)}`,
+      nextText: () => `Next: +${formatNumber(rootLuckLvl + 1)}`
+    },
+    max_roots_plus: {
+      id: 'max_roots_plus',
+      name: 'Increase Maximum Roots',
+      description: `Increases the maximum spiritual roots you can roll. Current bonus: +${formatNumber(maxRootsBonusLvl)} (effective max ${formatNumber(effectiveMaxRoots)}). Each purchase adds +1.`,
+      cost: maxRootsBonusCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.maxRootBonusLevel = maxRootsBonusLvl + 1 },
+      levelText: () => `Bonus: +${formatNumber(maxRootsBonusLvl)}`,
+      nextText: () => `Next bonus: +${formatNumber(maxRootsBonusLvl + 1)}`
+    },
+    more_rerolls: {
+      id: 'more_rerolls',
+      name: 'More Fate Rerolls',
+      description: `Grants +1 additional fate reroll per purchase. Current bonus purchased: +${formatNumber(moreRerollsLvl)}.`,
+      cost: moreRerollsCost,
+      prereq: ['reroll'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.extraRerollsLevel = moreRerollsLvl + 1 },
+      levelText: () => `Bonus rerolls: +${formatNumber(moreRerollsLvl)}`,
+      nextText: () => `Next: +${formatNumber(moreRerollsLvl + 1)}`
+    },
+    bloodline_luck: {
+      id: 'bloodline_luck',
+      name: 'Better Bloodline Luck',
+      description: `Increases your luck of rolling better bloodlines. Current: +${formatNumber(bloodlineLuckLvl)} luck (level ${bloodlineLuckLvl}). Each purchase adds +1.`,
+      cost: bloodlineLuckCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.bloodlineLuckLevel = bloodlineLuckLvl + 1 },
+      levelText: () => `Luck: +${formatNumber(bloodlineLuckLvl)}`,
+      nextText: () => `Next: +${formatNumber(bloodlineLuckLvl + 1)}`
+    },
+    multi_affinity_luck: {
+      id: 'multi_affinity_luck',
+      name: 'Multiple Affinity Luck',
+      description: `Increases your luck of rolling multiple affinities. Current: +${formatNumber(multiAffinityLuckLvl)} luck (level ${multiAffinityLuckLvl}). Each purchase adds +1.`,
+      cost: multiAffinityLuckCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.multiAffinityLuckLevel = multiAffinityLuckLvl + 1 },
+      levelText: () => `Luck: +${formatNumber(multiAffinityLuckLvl)}`,
+      nextText: () => `Next: +${formatNumber(multiAffinityLuckLvl + 1)}`
+    },
+    affinity_alignment: {
+      id: 'affinity_alignment',
+      name: 'Higher Affinity Alignment',
+      description: `Each purchase adds +1% chance for higher affinity alignment (higher affinity scores). Current: +${formatNumber(alignLuckLvl)}%.`,
+      cost: alignLuckCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.affinityAlignmentLuckLevel = alignLuckLvl + 1 },
+      levelText: () => `Chance: +${formatNumber(alignLuckLvl)}%`,
+      nextText: () => `Next: +${formatNumber(alignLuckLvl + 1)}%`
+    },
+    story_luck: {
+      id: 'story_luck',
+      name: 'Higher Story Luck',
+      description: `Each purchase adds +5% chance to roll higher Story Luck. Current: +${formatNumber(storyLuckLvl * 5)}%.`,
+      cost: storyLuckCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.storyLuckLuckLevel = storyLuckLvl + 1 },
+      levelText: () => `Chance: +${formatNumber(storyLuckLvl * 5)}%`,
+      nextText: () => `Next: +${formatNumber((storyLuckLvl + 1) * 5)}%`
+    },
+    spiritstone_rp: {
+      id: 'spiritstone_rp',
+      name: 'More RP from Spirit Stones',
+      description: `Increases rebirth points gained from spirit stones (per 500 of any grade). Current multiplier: ${formatMultiplier(stoneRpMult)}. Each purchase adds +2×. Cost scales by 3× per level.`,
+      cost: stoneRpCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.spiritStoneRpMultLevel = stoneRpLvl + 1 },
+      levelText: () => `Multiplier: ${formatMultiplier(stoneRpMult)}`,
+      nextText: () => `Next: ${formatMultiplier(1 + 2 * (stoneRpLvl + 1))}`
+    },
+    quest_drop: {
+      id: 'quest_drop',
+      name: 'Higher Quest Drop Chance',
+      description: `Increases item drop rate for quests that can drop bonus items. Current: +${formatNumber(questDropPct)}%. Each purchase adds +1%.`,
+      cost: questDropCost,
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      apply: () => { u.questDropChanceLevel = questDropLvl + 1 },
+      levelText: () => `Bonus: +${formatNumber(questDropPct)}%`,
+      nextText: () => `Next: +${formatNumber(questDropPct + 1)}%`
+    },
+    reroll: {
+      id: 'reroll',
+      name: 'Reroll Fate',
+      description: 'Unlocks the ability to reroll your starting fate.',
+      cost: 20,
+      prereq: ['start'],
+      purchased: Boolean(u.canRerollFate),
+      canBuy: () => !u.canRerollFate,
+      apply: () => { u.canRerollFate = true }
+    },
+    bias1: {
+      id: 'bias1',
+      name: 'Bloodline Bias I',
+      description: 'Increases your odds of better bloodlines.',
+      cost: 5,
+      prereq: ['reroll'],
+      purchased: u.bloodlineBias >= 0.10,
+      canBuy: () => u.bloodlineBias < 0.10,
+      apply: () => { u.bloodlineBias = Math.max(u.bloodlineBias, 0.10) }
+    },
+    bias2: {
+      id: 'bias2',
+      name: 'Bloodline Bias II',
+      description: 'Further increases your odds of better bloodlines.',
+      cost: 12,
+      prereq: ['bias1'],
+      purchased: u.bloodlineBias >= 0.25,
+      canBuy: () => u.bloodlineBias < 0.25,
+      apply: () => { u.bloodlineBias = Math.max(u.bloodlineBias, 0.25) }
+    },
+    bias3: {
+      id: 'bias3',
+      name: 'Bloodline Bias III',
+      description: 'Greatly increases your odds of better bloodlines.',
+      cost: 25,
+      prereq: ['bias2'],
+      purchased: u.bloodlineBias >= 0.50,
+      canBuy: () => u.bloodlineBias < 0.50,
+      apply: () => { u.bloodlineBias = Math.max(u.bloodlineBias, 0.50) }
+    },
+    min2: {
+      id: 'min2',
+      name: 'Minimum Roots II',
+      description: 'Guarantees at least 2 spiritual roots.',
+      cost: 8,
+      prereq: ['start'],
+      purchased: u.minRootCount >= 2,
+      canBuy: () => u.minRootCount < 2,
+      apply: () => {
+        u.minRootCount = Math.max(u.minRootCount, 2)
+        if (u.maxRootCount < u.minRootCount) u.maxRootCount = u.minRootCount
+      }
+    },
+    min3: {
+      id: 'min3',
+      name: 'Minimum Roots III',
+      description: 'Guarantees at least 3 spiritual roots.',
+      cost: 16,
+      prereq: ['min2'],
+      purchased: u.minRootCount >= 3,
+      canBuy: () => u.minRootCount < 3,
+      apply: () => {
+        u.minRootCount = Math.max(u.minRootCount, 3)
+        if (u.maxRootCount < u.minRootCount) u.maxRootCount = u.minRootCount
+      }
+    },
+    max6: {
+      id: 'max6',
+      name: 'Maximum Roots VI',
+      description: 'Raises your maximum spiritual roots to 6.',
+      cost: 10,
+      prereq: ['start'],
+      purchased: u.maxRootCount >= 6,
+      canBuy: () => u.maxRootCount < 6,
+      apply: () => { u.maxRootCount = Math.max(u.maxRootCount, 6) }
+    },
+    max7: {
+      id: 'max7',
+      name: 'Maximum Roots VII',
+      description: 'Raises your maximum spiritual roots to 7.',
+      cost: 18,
+      prereq: ['max6'],
+      purchased: u.maxRootCount >= 7,
+      canBuy: () => u.maxRootCount < 7,
+      apply: () => { u.maxRootCount = Math.max(u.maxRootCount, 7) }
+    },
+    reset: {
+      id: 'reset',
+      name: 'Reset Unlock',
+      description: resetProgress >= 100
+        ? 'Reset is fully unlocked.'
+        : `Progress toward unlocking Reset in Settings. Upgrade to ${resetNext}% each purchase.`,
+      cost: resetProgress >= 100 ? 0 : resetCost,
+      prereq: ['bias3', 'max7'],
+      purchased: resetProgress >= 100,
+      canBuy: () => resetProgress < 100,
+      apply: () => { u.resetUnlockProgress = Math.max(u.resetUnlockProgress, resetNext) },
+      levelText: () => `Progress: ${resetProgress}%`,
+      nextText: () => `Next: ${resetNext}%`
+    }
+  }
+
+  return defs[id] || {
+    id,
+    name: id,
+    description: 'Coming soon.',
+    cost: 0,
+    prereq: [],
+    purchased: false,
+    canBuy: () => false
+  }
+}
+
+window.openRebirthNodeModal = (nodeId) => {
+  const id = String(nodeId || '')
+  if (!id) return
+  state.rebirthNodeModalId = id
+  state.showRebirthNodeModal = true
+  render()
+  try { saveGame() } catch (_) {}
+}
+
+window.closeRebirthNodeModal = () => {
+  state.showRebirthNodeModal = false
+  state.rebirthNodeModalId = null
+  render()
+  try { saveGame() } catch (_) {}
+}
+
+window.buyRebirthNodeFromModal = () => {
+  const id = String(state.rebirthNodeModalId || '')
+  if (!id) return
+  window.buyRebirthNode(id)
+  // If purchase succeeded, keep the modal open but refresh its contents.
+  state.showRebirthNodeModal = true
+  render()
+}
+
+function renderRebirthNodeModal() {
+  let modal = document.getElementById('rebirth-node-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'rebirth-node-modal'
+    modal.className = 'modal-overlay'
+    document.body.appendChild(modal)
+  }
+
+  const id = String(state.rebirthNodeModalId || '')
+  const def = getRebirthNodeDefinition(id)
+  const pts = clampNonNegativeInt(state.rebirthPoints || 0)
+
+  // Determine lock status based on purchased prereqs.
+  const prereq = Array.isArray(def.prereq) ? def.prereq : []
+  const prereqPurchased = (rid) => {
+    const d = getRebirthNodeDefinition(rid)
+    return Boolean(d.purchased)
+  }
+  const locked = prereq.some(r => !prereqPurchased(r))
+  const cost = clampNonNegativeInt(def.cost)
+  const afford = pts >= cost
+  const canBuy = (typeof def.canBuy === 'function' ? Boolean(def.canBuy()) : true)
+  const buyDisabled = locked || cost <= 0 || !afford || !canBuy
+
+  const iconSrc = escapeHtml(String(getRebirthNodeIconSrc(def.id) || ''))
+  const levelText = typeof def.levelText === 'function' ? String(def.levelText() || '') : ''
+  const nextText = typeof def.nextText === 'function' ? String(def.nextText() || '') : ''
+  const prereqText = prereq.length ? `Requires: ${prereq.map(p => escapeHtml(String(getRebirthNodeDefinition(p).name || p))).join(', ')}` : ''
+
+  modal.innerHTML = `
+    <div class="modal-content">
+      <div class="rebirth-node-modal-top">
+        <img class="rebirth-node-icon" src="${iconSrc}" alt="" />
+        <h2>${escapeHtml(String(def.name || 'Node'))}</h2>
+      </div>
+      <p>${escapeHtml(String(def.description || ''))}</p>
+      ${levelText ? `<p><strong>${escapeHtml(levelText)}</strong></p>` : ''}
+      ${nextText ? `<p><strong>${escapeHtml(nextText)}</strong></p>` : ''}
+      ${prereqText ? `<p class="muted">${prereqText}</p>` : ''}
+      <p><strong>Cost:</strong> ${formatNumber(cost)} RP</p>
+      <div class="modal-buttons">
+        <button onclick="window.buyRebirthNodeFromModal()" class="reset-button" ${buyDisabled ? 'disabled' : ''}>Buy</button>
+        <button onclick="window.closeRebirthNodeModal()" class="cancel-button">Close</button>
+      </div>
+    </div>
+  `
+}
+
 function renderDevButton() {
   // Check if dev button already exists
   let devButton = document.getElementById('dev-reset-container')
@@ -4172,6 +5453,15 @@ function renderSidePanelToggles() {
     <button class="panel-toggle-btn ${state.activeSidePanels.has('actions') ? 'active' : ''}" onclick="window.toggleSidePanel('actions')" title="Actions">
       ${renderUiIcon('actions', { title: 'Actions' })}
     </button>
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('herbalism') ? 'active' : ''}" onclick="window.toggleSidePanel('herbalism')" title="Herbalism">
+      ${renderUiIcon('spark', { title: 'Herbalism' })}
+    </button>
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('settings') ? 'active' : ''}" onclick="window.toggleSidePanel('settings')" title="Settings">
+      ${renderUiIcon('settings', { title: 'Settings' })}
+    </button>
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('recipes') ? 'active' : ''}" onclick="window.toggleSidePanel('recipes')" title="Recipe Book">
+      ${renderUiIcon('quests', { title: 'Recipe Book' })}
+    </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('profile') ? 'active' : ''}" onclick="window.toggleSidePanel('profile')" title="Character Profile">
       ${renderUiIcon('profile', { title: 'Character Profile' })}
     </button>
@@ -4186,6 +5476,10 @@ function renderSidePanelToggles() {
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('shop') ? 'active' : ''}" onclick="window.toggleSidePanel('shop')" title="Shop">
       ${renderUiIcon('shop', { title: 'Shop' })}
+    </button>
+
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('leaderboards') ? 'active' : ''}" onclick="window.toggleSidePanel('leaderboards')" title="Leaderboards">
+      ${renderUiIcon('stats', { title: 'Leaderboards' })}
     </button>
 
     ${state.cloudConqueredSectsUnlocked ? `
@@ -4209,6 +5503,10 @@ window.toggleSidePanel = function(panelType) {
       try { ensureShopsInitialized() } catch (_) {}
       if (!state.shopTab) state.shopTab = 'town'
     }
+    if (panelType === 'leaderboards') {
+      try { leaderboardScheduleSync('open_panel') } catch (_) {}
+      try { window.refreshLeaderboards() } catch (_) {}
+    }
   }
   render()
 }
@@ -4218,12 +5516,16 @@ function renderActivePanel() {
   const statsPanel = document.getElementById('stats-panel')
   const inventoryPanel = document.getElementById('inventory-panel')
   const actionsPanel = document.getElementById('actions-panel')
+  const herbalismPanel = document.getElementById('herbalism-panel')
+  const settingsPanel = document.getElementById('settings-panel')
+  const recipeBookPanel = document.getElementById('recipe-book-panel')
   const profilePanel = document.getElementById('profile-panel')
   const sectPanel = document.getElementById('sect-panel')
   const questPanel = document.getElementById('quest-panel')
   const movesPanel = document.getElementById('moves-panel')
   const shopPanel = document.getElementById('shop-panel')
   const conqueredSectsPanel = document.getElementById('conquered-sects-panel')
+  const leaderboardsPanel = document.getElementById('leaderboards-panel')
   // Back-compat: remove old separate shop panels if present.
   const townShopPanel = document.getElementById('town-shop-panel')
   const hourShopPanel = document.getElementById('hour-shop-panel')
@@ -4238,6 +5540,18 @@ function renderActivePanel() {
   if (actionsPanel && !state.activeSidePanels.has('actions')) {
     detachPanelResizePersistence(actionsPanel)
     actionsPanel.remove()
+  }
+  if (herbalismPanel && !state.activeSidePanels.has('herbalism')) {
+    detachPanelResizePersistence(herbalismPanel)
+    herbalismPanel.remove()
+  }
+  if (settingsPanel && !state.activeSidePanels.has('settings')) {
+    detachPanelResizePersistence(settingsPanel)
+    settingsPanel.remove()
+  }
+  if (recipeBookPanel && !state.activeSidePanels.has('recipes')) {
+    detachPanelResizePersistence(recipeBookPanel)
+    recipeBookPanel.remove()
   }
   if (profilePanel && !state.activeSidePanels.has('profile')) {
     detachPanelResizePersistence(profilePanel)
@@ -4263,6 +5577,10 @@ function renderActivePanel() {
     detachPanelResizePersistence(conqueredSectsPanel)
     conqueredSectsPanel.remove()
   }
+  if (leaderboardsPanel && !state.activeSidePanels.has('leaderboards')) {
+    detachPanelResizePersistence(leaderboardsPanel)
+    leaderboardsPanel.remove()
+  }
   if (townShopPanel) {
     detachPanelResizePersistence(townShopPanel)
     townShopPanel.remove()
@@ -4282,6 +5600,15 @@ function renderActivePanel() {
   if (state.activeSidePanels.has('actions')) {
     renderActionsPanel()
   }
+  if (state.activeSidePanels.has('herbalism')) {
+    renderHerbalismPanel()
+  }
+  if (state.activeSidePanels.has('settings')) {
+    renderSettingsPanel()
+  }
+  if (state.activeSidePanels.has('recipes')) {
+    renderRecipeBookPanel()
+  }
   if (state.activeSidePanels.has('profile')) {
     renderCharacterProfilePanel()
   }
@@ -4299,6 +5626,96 @@ function renderActivePanel() {
   }
   if (state.activeSidePanels.has('conqueredSects')) {
     renderConqueredSectsPanel()
+  }
+  if (state.activeSidePanels.has('leaderboards')) {
+    renderLeaderboardsPanel()
+  }
+}
+
+function renderLeaderboardsPanel() {
+  let panel = document.getElementById('leaderboards-panel')
+  const isNewPanel = !panel
+
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.id = 'leaderboards-panel'
+    panel.className = 'draggable-panel stats-panel'
+
+    applySavedPanelSize(panel, 'leaderboards')
+    getSidePanelsMount().appendChild(panel)
+    attachPanelResizePersistence(panel, 'leaderboards')
+
+    const pos = state.panelPositions?.leaderboards
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      panel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
+  }
+
+  const configured = isLeaderboardConfigured()
+  const major = state.leaderboards?.major || { rows: [], loading: false, error: '', fetchedAt: 0 }
+  const rebirth = state.leaderboards?.rebirth || { rows: [], loading: false, error: '', fetchedAt: 0 }
+
+  const selfName = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : 'Wanderer'
+  const selfRealm = state.bestMajorRealm?.label ? String(state.bestMajorRealm.label) : getCurrentMajorRealmLabel()
+  const selfRp = clampNonNegativeInt(state.rebirthPoints)
+
+  const renderRow = (row, mode) => {
+    const u = String(row?.username || '')
+    const rp = clampNonNegativeInt(row?.rebirth_points)
+    const bestRp = clampNonNegativeInt(row?.best_rebirth_points)
+    const realmLabel = String(row?.best_major_label || '')
+    const realmIdx = clampNonNegativeInt(row?.best_major_index)
+    const realm = realmLabel || (realmIdx >= 0 ? `Major Realm ${realmIdx + 1}` : '')
+    const v = (mode === 'rebirth') ? formatNumber(bestRp) : realm
+    const other = (mode === 'rebirth') ? `Realm: ${escapeHtml(realm)}` : `RP: ${formatNumber(rp)}`
+    return `
+      <div class="inventory-item">
+        <div class="inventory-item-header">
+          <strong>${escapeHtml(u || 'Unknown')}</strong>
+        </div>
+        <div class="inventory-item-desc">${escapeHtml(v)} <span style="opacity:0.8">(${escapeHtml(other)})</span></div>
+      </div>
+    `.trim()
+  }
+
+  const majorList = (Array.isArray(major.rows) ? major.rows : []).map(r => renderRow(r, 'major')).join('')
+  const rebirthList = (Array.isArray(rebirth.rows) ? rebirth.rows : []).map(r => renderRow(r, 'rebirth')).join('')
+
+  const anyLoading = Boolean(major.loading || rebirth.loading)
+  const err = String(major.error || rebirth.error || '')
+
+  panel.innerHTML = `
+    <div class="panel-header" onmousedown="window.startDrag(event, 'leaderboards-panel')">
+      <h3>${renderUiIcon('stats', { title: 'Leaderboards' })} Leaderboards</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content">
+      <div class="settings-hint"><strong>You:</strong> ${escapeHtml(selfName)} — ${escapeHtml(selfRealm || 'Major Realm 1')} — RP: ${formatNumber(selfRp)}</div>
+
+      ${!configured ? `
+        <div class="inventory-empty">Global leaderboards are not configured for this build.</div>
+        <div class="settings-hint">Set <strong>VITE_SUPABASE_URL</strong> and <strong>VITE_SUPABASE_ANON_KEY</strong> to enable.</div>
+      ` : ''}
+
+      ${configured ? `
+        <button class="settings-btn" onclick="window.refreshLeaderboards()" ${anyLoading ? 'disabled' : ''}>Refresh</button>
+        ${err ? `<div class="password-error" style="display:block; margin-top:8px;">${escapeHtml(err)}</div>` : ''}
+
+        <div class="settings-block" style="margin-top:10px;">
+          <div class="settings-block-title">TOP MAJOR REALM</div>
+          ${majorList || (anyLoading ? '<div class="inventory-empty">Loading...</div>' : '<div class="inventory-empty">No entries yet.</div>')}
+        </div>
+
+        <div class="settings-block" style="margin-top:12px;">
+          <div class="settings-block-title">TOP REBIRTH POINTS</div>
+          ${rebirthList || (anyLoading ? '<div class="inventory-empty">Loading...</div>' : '<div class="inventory-empty">No entries yet.</div>')}
+        </div>
+      ` : ''}
+    </div>
+  `
+
+  if (isNewPanel) {
+    // Panel was just created
   }
 }
 
@@ -4602,6 +6019,609 @@ function renderInventory() {
   }
 }
 
+function renderHerbalismPanel() {
+  let panel = document.getElementById('herbalism-panel')
+  const isNewPanel = !panel
+
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.id = 'herbalism-panel'
+    panel.className = 'herbalism-panel draggable-panel'
+
+    applySavedPanelSize(panel, 'herbalism')
+    getSidePanelsMount().appendChild(panel)
+    attachPanelResizePersistence(panel, 'herbalism')
+
+    const pos = state.panelPositions?.herbalism
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      panel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
+  }
+
+  const ignore = !!state.devIgnoreRequirements
+  const gatherKey = 'herbalism:Gather Herbs'
+  const isGathering = isActionRunning(gatherKey)
+  const craftKey = 'herbalism:Craft Pill'
+  const isCrafting = isActionRunning(craftKey)
+
+  const gatherSeconds = Math.max(0.25, (10 / Math.max(1, getRebirthHerbGatherSpeedMultiplier())))
+  const herbsPerGather = Math.max(1, clampNonNegativeInt(getRebirthHerbsPerGather()))
+  const autoGatherUnlocked = isRebirthAutoGatherUnlocked()
+  const autoCraftUnlocked = isRebirthAutoCraftUnlocked()
+  const pills = getPillCatalog()
+  const selectedAutoPill = String(state.autoCraftPillFile || '')
+  const selectedAutoPillName = pills.find(p => String(p.file || '') === selectedAutoPill)?.name || ''
+
+  const herbs = getHerbCatalog()
+  const herbCounts = Object.fromEntries(herbs.map(h => [h.name, getInventoryQuantityByName(h.name)]))
+
+  if (!Array.isArray(state.herbalismCraftSlots) || state.herbalismCraftSlots.length !== 3) {
+    state.herbalismCraftSlots = [null, null, null]
+  }
+  if (!Number.isFinite(state.herbalismCraftPickerIndex)) state.herbalismCraftPickerIndex = -1
+
+  const slots = state.herbalismCraftSlots.map(s => (typeof s === 'string' && s.trim()) ? s.trim() : '')
+  const filled = slots.filter(Boolean).length
+  const canCraft = ignore ? (filled === 3) : (filled === 3 && slots.every(h => getInventoryQuantityByName(h) >= 1))
+
+  panel.innerHTML = `
+    <div class="panel-header" onmousedown="window.startDrag(event, 'herbalism-panel')">
+      <h3>${renderUiIcon('spark', { title: 'Herbalism' })} Herbalism</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content herbalism-content">
+      <div class="herbalism-summary">
+        ${herbs.map(h => `
+          <div class="herbalism-line"><img class="inline-asset-icon" src="${escapeHtml(String(h.imageSrc || 'assets/grass.png'))}" alt=""> ${escapeHtml(h.name)}: <strong>${formatNumber(herbCounts[h.name] || 0)}</strong></div>
+        `.trim()).join('')}
+      </div>
+
+      <div class="herbalism-block">
+        <div class="herbalism-block-title">GATHER</div>
+        <button class="herbalism-btn" onclick="window.gatherHerbs()" ${(isGathering && !ignore) ? 'disabled' : ''}>
+          ${isGathering ? 'Gathering…' : `Gather Herbs (${gatherSeconds.toFixed(1)}s)`}
+        </button>
+        <div class="herbalism-progress" ${isGathering ? '' : 'style="display:none;"'}>
+          <div class="herbalism-progress-bar">
+            <div class="herbalism-progress-fill" data-progress-key="${escapeHtml(gatherKey)}"></div>
+          </div>
+        </div>
+        <div class="herbalism-hint">Herb gathering costs no stamina and gathers ${formatNumber(herbsPerGather)} herb(s) per completion.</div>
+        ${autoGatherUnlocked ? `<div class="herbalism-hint">Auto Gather: UNLOCKED (runs automatically).</div>` : ''}
+      </div>
+
+      <div class="herbalism-block">
+        <div class="herbalism-block-title">CRAFT</div>
+        <div class="herbalism-craft-grid" aria-label="Crafting herbs">
+          ${[0, 1, 2].map(i => {
+            const v = slots[i]
+            const label = v ? v : 'Select herb'
+            return `
+              <button class="herbalism-craft-slot" type="button" onclick="window.openHerbCraftPicker(${i})">${escapeHtml(label)}</button>
+            `.trim()
+          }).join('')}
+        </div>
+        <div class="herbalism-hint">Pick 3 herbs to match a recipe from the Recipe Book.</div>
+
+        ${state.herbalismCraftPickerIndex >= 0 ? `
+          <div class="herbalism-picker" aria-label="Choose herb">
+            <div class="herbalism-block-title">CHOOSE HERB</div>
+            <div class="herbalism-picker-list">
+              ${herbs
+                .filter(h => (ignore ? true : (getInventoryQuantityByName(h.name) > 0)))
+                .map(h => `<button class="herbalism-picker-item" type="button" onclick="window.setHerbCraftSlot(${state.herbalismCraftPickerIndex}, ${JSON.stringify(String(h.name))})">${escapeHtml(h.name)} (${formatNumber(getInventoryQuantityByName(h.name))})</button>`)
+                .join('') || '<div class="inventory-empty">No herbs available.</div>'}
+            </div>
+            <div class="herbalism-picker-actions">
+              <button class="herbalism-btn" type="button" onclick="window.clearHerbCraftSlot(${state.herbalismCraftPickerIndex})">Clear Slot</button>
+              <button class="herbalism-btn" type="button" onclick="window.closeHerbCraftPicker()">Close</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <button class="herbalism-btn" onclick="window.craftFromHerbSlots()" ${((!canCraft && !ignore) || (isCrafting && !ignore)) ? 'disabled' : ''}>
+          ${isCrafting ? 'Crafting…' : 'Craft (use selected herbs)'}
+        </button>
+        <div class="herbalism-progress" ${isCrafting ? '' : 'style="display:none;"'}>
+          <div class="herbalism-progress-bar">
+            <div class="herbalism-progress-fill" data-progress-key="${escapeHtml(craftKey)}"></div>
+          </div>
+        </div>
+        <div class="herbalism-hint">Crafting consumes exactly 3 herbs and produces 1 pill.</div>
+
+        ${autoCraftUnlocked ? `
+          <div class="herbalism-hint">Auto Craft: UNLOCKED (crafts automatically when possible).</div>
+          <div class="herbalism-line">
+            Auto craft pill:
+            <select class="herbalism-select" onchange="window.setAutoCraftPillFile(this.value)">
+              <option value="" ${selectedAutoPill ? '' : 'selected'}>None</option>
+              ${pills.map(p => {
+                const file = String(p.file || '')
+                const name = String(p.name || file)
+                return `<option value="${escapeHtml(file)}" ${file === selectedAutoPill ? 'selected' : ''}>${escapeHtml(name)}</option>`
+              }).join('')}
+            </select>
+          </div>
+          ${selectedAutoPillName ? `<div class="herbalism-hint">Selected: ${escapeHtml(String(selectedAutoPillName))}</div>` : ''}
+        ` : ''}
+      </div>
+
+      <div class="herbalism-block">
+        <div class="herbalism-block-title">RECIPE BOOK</div>
+        <button class="herbalism-btn" onclick="window.toggleSidePanel('recipes')">Open Recipe Book</button>
+        <div class="herbalism-hint">View all pills and their herb recipes.</div>
+      </div>
+    </div>
+  `
+
+  if (isNewPanel) {
+    // Panel was just created
+  }
+}
+
+function getHerbCatalog() {
+  return [
+    { name: 'Ginseng', kind: 'ingredient', imageSrc: 'assets/grass.png', description: 'A hardy root used in many formulas.' },
+    { name: 'Spirit Grass', kind: 'ingredient', imageSrc: 'assets/grass.png', description: 'A grass infused with faint Qi.' },
+    { name: 'Bloody Root', kind: 'ingredient', imageSrc: 'assets/grass.png', description: 'A crimson root that carries a sharp essence.' },
+    { name: 'Snow Lotus', kind: 'ingredient', imageSrc: 'assets/grass.png', description: 'A rare lotus that grows in cold peaks.' },
+    { name: 'Jade Leaf', kind: 'ingredient', imageSrc: 'assets/grass.png', description: 'A leaf with a clean, cooling essence.' },
+    { name: 'Moonflower', kind: 'ingredient', imageSrc: 'assets/grass.png', description: 'A pale flower that blooms under moonlight.' },
+    { name: 'Dragonwort', kind: 'ingredient', imageSrc: 'assets/grass.png', description: 'A pungent herb said to carry draconic warmth.' }
+  ]
+}
+
+function getPillRecipeByFile(pillFile) {
+  const file = String(pillFile || '')
+  const map = {
+    'herb_pill.png': [
+      { herb: 'Jade Leaf', qty: 2 },
+      { herb: 'Spirit Grass', qty: 1 }
+    ],
+    'qi_pill.png': [
+      { herb: 'Spirit Grass', qty: 2 },
+      { herb: 'Ginseng', qty: 1 }
+    ],
+    'ying_yang_pill.png': [
+      { herb: 'Moonflower', qty: 1 },
+      { herb: 'Ginseng', qty: 1 },
+      { herb: 'Jade Leaf', qty: 1 }
+    ],
+    'breakthrough_pill.png': [
+      { herb: 'Ginseng', qty: 2 },
+      { herb: 'Snow Lotus', qty: 1 }
+    ],
+    'iron_body_pill.png': [
+      { herb: 'Bloody Root', qty: 2 },
+      { herb: 'Dragonwort', qty: 1 }
+    ],
+    'angel_pill.png': [
+      { herb: 'Snow Lotus', qty: 2 },
+      { herb: 'Moonflower', qty: 1 }
+    ],
+    'corruption_pill.png': [
+      { herb: 'Bloody Root', qty: 2 },
+      { herb: 'Moonflower', qty: 1 }
+    ],
+    'demon_pill.png': [
+      { herb: 'Dragonwort', qty: 2 },
+      { herb: 'Bloody Root', qty: 1 }
+    ],
+    'lightning_pill.png': [
+      { herb: 'Spirit Grass', qty: 1 },
+      { herb: 'Moonflower', qty: 2 }
+    ],
+    'death_pill.png': [
+      { herb: 'Bloody Root', qty: 1 },
+      { herb: 'Dragonwort', qty: 1 },
+      { herb: 'Moonflower', qty: 1 }
+    ]
+  }
+
+  const recipe = Array.isArray(map[file]) ? map[file] : null
+  // Fallback: ensure exactly 3 total herbs.
+  if (recipe && recipe.reduce((a, r) => a + clampNonNegativeInt(r?.qty), 0) === 3) return recipe
+  return [
+    { herb: 'Ginseng', qty: 1 },
+    { herb: 'Spirit Grass', qty: 1 },
+    { herb: 'Jade Leaf', qty: 1 }
+  ]
+}
+
+function awardRandomGatheredHerbs(count) {
+  const herbs = getHerbCatalog()
+  const times = Math.max(1, clampNonNegativeInt(count))
+  const gainedByName = Object.create(null)
+
+  const pickOne = () => {
+    const roll = Math.random()
+    // Weighted pick.
+    let picked = herbs.find(h => h.name === 'Spirit Grass') || herbs[0]
+    if (roll < 0.12) picked = herbs.find(h => h.name === 'Snow Lotus') || picked
+    else if (roll < 0.24) picked = herbs.find(h => h.name === 'Moonflower') || picked
+    else if (roll < 0.38) picked = herbs.find(h => h.name === 'Dragonwort') || picked
+    else if (roll < 0.54) picked = herbs.find(h => h.name === 'Bloody Root') || picked
+    else if (roll < 0.72) picked = herbs.find(h => h.name === 'Ginseng') || picked
+    else if (roll < 0.88) picked = herbs.find(h => h.name === 'Jade Leaf') || picked
+    return picked
+  }
+
+  for (let i = 0; i < times; i++) {
+    const picked = pickOne()
+    const name = picked?.name || 'Spirit Grass'
+    gainedByName[name] = (gainedByName[name] || 0) + 1
+    addToInventory({
+      name,
+      kind: 'ingredient',
+      description: picked?.description || '',
+      imageSrc: picked?.imageSrc || 'assets/grass.png',
+      quantity: 1
+    })
+  }
+
+  const parts = Object.keys(gainedByName).map(n => `+${formatNumber(gainedByName[n])} ${n}`)
+  log(`You gather herbs. ${parts.join(', ') || '+1 Spirit Grass'}.`)
+}
+
+function getHerbGatherDurationMs() {
+  const baseMs = 10000
+  const speed = Math.max(1, getRebirthHerbGatherSpeedMultiplier())
+  return Math.max(250, Math.floor(baseMs / speed))
+}
+
+function getHerbCraftDurationMs() {
+  const baseMs = 5000
+  const reduction = getRebirthPillCraftDurationReductionMs()
+  return Math.max(250, baseMs - reduction)
+}
+
+function startHerbalismCraftTimed(pill, opts) {
+  const options = (opts && typeof opts === 'object') ? opts : {}
+  const ignore = Boolean(options.ignoreRequirements)
+  const p = pill && typeof pill === 'object' ? pill : null
+  if (!p) return false
+
+  const action = {
+    name: 'Craft Pill',
+    callback: () => {
+      addToInventory({
+        name: String(p.name || 'Pill'),
+        kind: 'pill',
+        pillFile: String(p.file || ''),
+        imageSrc: String(p.src || ''),
+        description: getPillDescription(p.file),
+        quantity: 1
+      })
+      log(`You craft a ${String(p.name || 'pill')}.`)
+    }
+  }
+
+  const key = getActionKey('herbalism', action)
+  if (ignore) {
+    if (isActionRunning(key)) finishTimedActionWithOptions(key, { ignoreCooldown: true })
+    action.callback()
+    render()
+    saveGame()
+    return true
+  }
+
+  if (isActionRunning(key)) return false
+  startTimedAction('herbalism', action, getHerbCraftDurationMs())
+  saveGame()
+  return true
+}
+
+function canAutoCraftSelectedPill() {
+  const file = String(state.autoCraftPillFile || '')
+  if (!file) return false
+  const pill = getPillCatalog().find(p => String(p.file || '') === file)
+  if (!pill) return false
+  const recipe = getPillRecipeByFile(file)
+  if (!Array.isArray(recipe) || recipe.length === 0) return false
+  if (state.devIgnoreRequirements) return true
+  for (const r of recipe) {
+    const herb = String(r?.herb || '')
+    const qty = clampNonNegativeInt(r?.qty)
+    if (!herb || qty <= 0) return false
+    if (getInventoryQuantityByName(herb) < qty) return false
+  }
+  return true
+}
+
+function consumeRecipeForPillFile(file) {
+  const recipe = getPillRecipeByFile(file)
+  if (!Array.isArray(recipe) || recipe.length === 0) return false
+  if (state.devIgnoreRequirements) return true
+  for (const r of recipe) {
+    const herb = String(r?.herb || '')
+    const qty = clampNonNegativeInt(r?.qty)
+    if (!herb || qty <= 0) return false
+    if (getInventoryQuantityByName(herb) < qty) return false
+  }
+  for (const r of recipe) {
+    const herb = String(r?.herb || '')
+    const qty = clampNonNegativeInt(r?.qty)
+    if (!consumeInventoryByName(herb, qty)) return false
+  }
+  return true
+}
+
+window.setAutoCraftPillFile = (pillFile) => {
+  state.autoCraftPillFile = String(pillFile || '')
+  render()
+  saveGame()
+}
+
+function startHerbGatherTimed(opts) {
+  const options = (opts && typeof opts === 'object') ? opts : {}
+  const silent = Boolean(options.silent)
+
+  if (!silent) {
+    try { playSfx('gather') } catch (_) {}
+  }
+
+  const action = {
+    name: 'Gather Herbs',
+    callback: () => {
+      state.isResting = false
+      if (typeof state.mysteriousHerbFound !== 'boolean') state.mysteriousHerbFound = false
+
+      awardRandomGatheredHerbs(getRebirthHerbsPerGather())
+
+      // Rare, one-time permanent herb.
+      if (!state.mysteriousHerbFound && Math.random() < 0.03) {
+        state.mysteriousHerbFound = true
+        addToInventory({
+          name: 'Mysterious Herb',
+          description: 'Qi gain permanently increased by 20%',
+          quantity: 1
+        })
+        log('You discover a Mysterious Herb.')
+      }
+    }
+  }
+
+  startTimedAction('herbalism', action, getHerbGatherDurationMs())
+}
+
+window.gatherHerbs = () => {
+  startHerbGatherTimed({ silent: false })
+}
+
+window.openHerbCraftPicker = (slotIndex) => {
+  const i = clampNonNegativeInt(slotIndex)
+  state.herbalismCraftPickerIndex = (i >= 0 && i <= 2) ? i : -1
+  render()
+}
+
+window.closeHerbCraftPicker = () => {
+  state.herbalismCraftPickerIndex = -1
+  render()
+}
+
+window.setHerbCraftSlot = (slotIndex, herbName) => {
+  const i = clampNonNegativeInt(slotIndex)
+  if (!Array.isArray(state.herbalismCraftSlots) || state.herbalismCraftSlots.length !== 3) state.herbalismCraftSlots = [null, null, null]
+  const n = String(herbName || '').trim()
+  if (!n) return
+  state.herbalismCraftSlots[i] = n
+  state.herbalismCraftPickerIndex = -1
+  render()
+  saveGame()
+}
+
+window.clearHerbCraftSlot = (slotIndex) => {
+  const i = clampNonNegativeInt(slotIndex)
+  if (!Array.isArray(state.herbalismCraftSlots) || state.herbalismCraftSlots.length !== 3) state.herbalismCraftSlots = [null, null, null]
+  state.herbalismCraftSlots[i] = null
+  state.herbalismCraftPickerIndex = -1
+  render()
+  saveGame()
+}
+
+function multisetFromList(list) {
+  const out = Object.create(null)
+  for (const v of list) {
+    const k = String(v || '').trim()
+    if (!k) continue
+    out[k] = (out[k] || 0) + 1
+  }
+  return out
+}
+
+function multisetEquals(a, b) {
+  const ka = Object.keys(a || {})
+  const kb = Object.keys(b || {})
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if ((a[k] || 0) !== (b[k] || 0)) return false
+  }
+  return true
+}
+
+function findPillBySelectedHerbs(herbNames) {
+  const chosen = multisetFromList(herbNames)
+  const pills = getPillCatalog()
+  for (const p of pills) {
+    const recipe = getPillRecipeByFile(p.file)
+    const expanded = []
+    for (const r of recipe) {
+      const q = clampNonNegativeInt(r.qty)
+      for (let i = 0; i < q; i++) expanded.push(String(r.herb || ''))
+    }
+    const rec = multisetFromList(expanded)
+    if (multisetEquals(chosen, rec)) return p
+  }
+  return null
+}
+
+window.craftFromHerbSlots = () => {
+  try { playSfx('craft') } catch (_) {}
+  if (!Array.isArray(state.herbalismCraftSlots) || state.herbalismCraftSlots.length !== 3) state.herbalismCraftSlots = [null, null, null]
+  const slots = state.herbalismCraftSlots.map(s => (typeof s === 'string' && s.trim()) ? s.trim() : '').filter(Boolean)
+  if (slots.length !== 3) return
+
+  const pill = findPillBySelectedHerbs(slots)
+  if (!pill) {
+    log('No known recipe matches those herbs. Check the Recipe Book.')
+    render()
+    saveGame()
+    return
+  }
+
+  if (!state.devIgnoreRequirements) {
+    const need = multisetFromList(slots)
+    for (const herb of Object.keys(need)) {
+      if (getInventoryQuantityByName(herb) < need[herb]) return
+    }
+    for (const herb of Object.keys(need)) {
+      if (!consumeInventoryByName(herb, need[herb])) return
+    }
+  }
+
+  startHerbalismCraftTimed(pill, { ignoreRequirements: !!state.devIgnoreRequirements })
+}
+
+function renderRecipeBookPanel() {
+  let panel = document.getElementById('recipe-book-panel')
+  const isNewPanel = !panel
+
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.id = 'recipe-book-panel'
+    panel.className = 'recipe-book-panel draggable-panel'
+
+    applySavedPanelSize(panel, 'recipes')
+    getSidePanelsMount().appendChild(panel)
+    attachPanelResizePersistence(panel, 'recipes')
+
+    const pos = state.panelPositions?.recipes
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      panel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
+  }
+
+  const pills = getPillCatalog()
+  const list = pills.map(p => {
+    const recipe = getPillRecipeByFile(p.file)
+    const recipeText = recipe.map(r => `${formatNumber(r.qty)} ${escapeHtml(r.herb)}`).join(', ')
+    return `
+      <div class="profile-trait">
+        <strong>${escapeHtml(String(p.name || 'Pill'))}</strong><br>
+        <span>${recipeText}</span>
+      </div>
+    `.trim()
+  }).join('')
+
+  panel.innerHTML = `
+    <div class="panel-header" onmousedown="window.startDrag(event, 'recipe-book-panel')">
+      <h3>${renderUiIcon('quests', { title: 'Recipe Book' })} Recipe Book</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content">
+      ${list || '<div class="inventory-empty">No recipes.</div>'}
+    </div>
+  `
+
+  if (isNewPanel) {
+    // Panel was just created
+  }
+}
+
+function isResetRunUnlocked() {
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  return clampNonNegativeInt(u.resetUnlockProgress) >= 100
+}
+
+window.setHardMode = (enabled) => {
+  state.hardMode = Boolean(enabled)
+  log(state.hardMode
+    ? 'Hard Mode enabled. Enemies hit harder, and death ends your run.'
+    : 'Hard Mode disabled.')
+  render()
+  saveGame()
+}
+
+function applyHardModeEnemyScaling(enemy) {
+  if (!state.hardMode) return enemy
+  if (!enemy || typeof enemy !== 'object') return enemy
+
+  const hpMult = 1.12
+  const strMult = 1.12
+
+  const maxHp = Math.max(1, Math.floor(clampNonNegativeNumber(enemy.maxHealth ?? enemy.health) * hpMult))
+  const hp = Math.max(1, Math.floor(clampNonNegativeNumber(enemy.health ?? maxHp) * hpMult))
+  const str = Math.max(1, Math.floor(clampNonNegativeNumber(enemy.strength) * strMult))
+
+  enemy.maxHealth = maxHp
+  enemy.health = Math.min(maxHp, hp)
+  enemy.strength = str
+  return enemy
+}
+
+window.endRunViaUnlockedReset = () => {
+  if (!isResetRunUnlocked()) return
+  if (state.runEnded) return
+  log('You invoke the Reset blessing. Your run ends.')
+  window.endRunToRebirth()
+}
+
+function renderSettingsPanel() {
+  let panel = document.getElementById('settings-panel')
+  const isNewPanel = !panel
+
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.id = 'settings-panel'
+    panel.className = 'settings-panel draggable-panel'
+
+    applySavedPanelSize(panel, 'settings')
+    getSidePanelsMount().appendChild(panel)
+    attachPanelResizePersistence(panel, 'settings')
+
+    const pos = state.panelPositions?.settings
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      panel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
+  }
+
+  const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = u
+  const resetPct = clampNonNegativeInt(u.resetUnlockProgress)
+  const resetReady = resetPct >= 100
+
+  panel.innerHTML = `
+    <div class="panel-header" onmousedown="window.startDrag(event, 'settings-panel')">
+      <h3>${renderUiIcon('settings', { title: 'Settings' })} Settings</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content settings-content">
+      <div class="settings-block">
+        <div class="settings-block-title">DIFFICULTY</div>
+        <label class="settings-row">
+          <input type="checkbox" ${state.hardMode ? 'checked' : ''} onchange="window.setHardMode(this.checked)" />
+          <span class="settings-row-text">Hard Mode (death ends your run)</span>
+        </label>
+        <div class="settings-hint">You can toggle Hard Mode at any time.</div>
+      </div>
+
+      <div class="settings-block">
+        <div class="settings-block-title">RUN RESET</div>
+        <div class="settings-hint">Unlock progress: <strong>${formatNumber(resetPct)}%</strong></div>
+        <button class="settings-btn" onclick="window.endRunViaUnlockedReset()" ${(!resetReady || state.runEnded) ? 'disabled' : ''}>
+          End Run (Reset)
+        </button>
+        <div class="settings-hint">This button unlocks from the Rebirth Tree at 100%.</div>
+      </div>
+    </div>
+  `
+
+  if (isNewPanel) {
+    // Panel was just created
+  }
+}
+
 function renderActionsPanel() {
   let actionsPanel = document.getElementById('actions-panel')
   const isNewPanel = !actionsPanel
@@ -4673,40 +6693,9 @@ function renderActionsPanel() {
       grabGroceriesAction.disabled = ignoreRequirements ? false : (state.stamina < 2)
     }
 
-    // Herb gathering repeatable (unlocks after buying farming tools)
-    const herbActionName = 'Gather Herbs'
-    if (state.hasBoughtTools && !state.runEnded) {
-      if (!state.repeatableActions.some(a => a?.name === herbActionName)) {
-        state.repeatableActions.push({
-          name: herbActionName,
-          icon: '',
-          disabled: false,
-          callback: () => window.gatherHerbs()
-        })
-      }
-    } else {
-      state.repeatableActions = (Array.isArray(state.repeatableActions) ? state.repeatableActions : []).filter(a => a?.name !== herbActionName)
-    }
-    const herbAction = state.repeatableActions.find(a => a?.name === herbActionName)
-    if (herbAction) {
-      herbAction.disabled = ignoreRequirements ? false : (state.stamina < 2)
-    }
-
-    // Herb crafting special action (requires enough herbs)
-    if (!state.runEnded) {
-      const herbQty = getInventoryQuantityByName('Medicinal Herb')
-      if (herbQty >= 5) {
-        upsertSpecialActionByName({
-          name: 'Craft Herb Pill',
-          icon: '',
-          description: 'Consume 5 Medicinal Herb to craft 1 Herb Pill.',
-          disabled: false,
-          callback: () => window.craftHerbPill()
-        })
-      } else {
-        removeSpecialActionsByName(['Craft Herb Pill'])
-      }
-    }
+    // Herb gathering/crafting live in the Herbalism panel now.
+    state.repeatableActions = (Array.isArray(state.repeatableActions) ? state.repeatableActions : []).filter(a => a?.name !== 'Gather Herbs')
+    try { removeSpecialActionsByName(['Craft Herb Pill']) } catch (_) {}
 
     // Cloud conquest repeatable (unlocked after Major Accident)
     try { ensureCloudConquestState() } catch (_) {}
@@ -6286,7 +8275,7 @@ function renderFateRoll(container) {
       </div>
       
       <div class="fate-actions">
-        ${state.rerollsRemaining > 0 ? `<button onclick="window.rerollFate()">${renderUiIcon('dice', { title: 'Reroll' })} Reroll (${state.rerollsRemaining} left)</button>` : ''}
+        ${state.rebirthUpgrades?.canRerollFate && state.rerollsRemaining > 0 ? `<button onclick="window.rerollFate()">${renderUiIcon('dice', { title: 'Reroll' })} Reroll (${state.rerollsRemaining} left)</button>` : ''}
         <button onclick="window.startGame()">Continue →</button>
       </div>
     </div>
@@ -6452,8 +8441,10 @@ window.orthodoxWarShatterTheMandate = () => {
 window.orthodoxTrueEndingClaimRebirth = () => {
   try { window.closeStoryDialog() } catch (_) {}
   if (state.runEnded) return
-  awardRebirthPoints(ORTHODOX_TRUE_ENDING_REBIRTH_POINTS, 'True Ending')
-  window.endRunToRebirth()
+  // Award is handled via story milestone reconciliation; claiming should not end the run.
+  try { reconcileRebirthPointsFromStoryProgress() } catch (_) {}
+  render()
+  saveGame()
 }
 
 window.orthodoxTheWorldEnds = () => {
@@ -6641,7 +8632,7 @@ window.dmEndDemonsEndMyself = () => {
       'The world survives you. That was the price.'
     ],
     [
-      { label: 'The end.', onClick: 'window.endRunToRebirth()' }
+      { label: 'Continue.', onClick: 'window.closeStoryDialog()' }
     ],
     {
       mode: 'PAGE_SWAP',
@@ -6822,7 +8813,7 @@ window.dmEndLifeOfDemon = () => {
           'The screaming stops. The stain does not.'
         ],
         [
-          { label: 'The end.', onClick: 'window.endRunToRebirth()' }
+          { label: 'Continue.', onClick: 'window.closeStoryDialog()' }
         ],
         {
           mode: 'PAGE_SWAP',
@@ -6844,18 +8835,24 @@ window.dmEndLifeOfDemon = () => {
 // ============================================================================
 // Shared run-ending helper (used by multiple endings)
 // ============================================================================
-window.endRunToRebirth = () => {
+window.endRunToRebirth = (options) => {
   try { window.closeStoryDialog() } catch (_) {}
   if (state.runEnded) return
+
+  const opts = (options && typeof options === 'object') ? options : {}
+  const actionName = String(opts.actionName || 'Rebirth.')
+  const actionIcon = String(opts.actionIcon || '🔁')
+  const actionDescription = String(opts.actionDescription || 'Start a new life. (Keeps Rebirth Points.)')
+
   state.runEnded = true
   state.isResting = false
   state.isCultivating = false
   state.repeatableActions = []
   state.specialActions = []
   upsertSpecialActionByName({
-    name: 'Rebirth.',
-    icon: '🔁',
-    description: 'Start a new life. (Keeps Rebirth Points.)',
+    name: actionName,
+    icon: actionIcon,
+    description: actionDescription,
     disabled: false,
     callback: () => window.beginRebirth()
   })
@@ -6882,13 +8879,13 @@ function startDemonCosmicFinaleCombat() {
   state.questReturnPhase = state.phase
   closePanelsForCombatStart()
   state.inCombat = true
-  state.enemy = {
+  state.enemy = applyHardModeEnemyScaling({
     name: 'Being of Pure Energy',
     icon: '✨',
     health: bossHp,
     maxHealth: bossHp,
     strength: bossStr
-  }
+  })
   state.phase = 'COMBAT'
   ensureCombatLoop()
 
@@ -6925,7 +8922,7 @@ function handleDemonCosmicFinaleCombatVictory(_enemyName) {
       '…and then there is only you.'
     ],
     [
-      { label: 'The end.', onClick: 'window.demonCosmicEndingEndRun()' }
+      { label: 'Continue.', onClick: 'window.closeStoryDialog()' }
     ],
     {
       mode: 'PAGE_SWAP',
@@ -6941,7 +8938,7 @@ function handleDemonCosmicFinaleCombatVictory(_enemyName) {
 }
 
 window.demonCosmicEndingEndRun = () => {
-  window.endRunToRebirth()
+  window.closeStoryDialog()
 }
 
 function handleDemonCosmicFinaleCombatDefeat() {
@@ -7128,7 +9125,7 @@ window.dmCabinTheEnd = () => {
       'It learned you.'
     ],
     [
-      { label: 'The end.', onClick: 'window.endRunToRebirth()' }
+      { label: 'Continue.', onClick: 'window.closeStoryDialog()' }
     ],
     {
       mode: 'PAGE_SWAP',
@@ -8074,6 +10071,7 @@ function runDemonCinematic() {
 // Demon cinematic outcome: player wins
 window.demonCinematicWhatsPoint = () => {
   if (state.runEnded) return
+  removeSpecialActionsByName(["What's the point."])
   openStoryDialog(
     'ENDING',
     "Bad Ending — What's the Point",
@@ -8083,7 +10081,7 @@ window.demonCinematicWhatsPoint = () => {
       'You stare at the horizon until the horizon stares back.'
     ],
     [
-      { label: 'The end.', onClick: 'window.endRunToRebirth()' }
+      { label: 'Continue.', onClick: 'window.closeStoryDialog()' }
     ],
     {
       mode: 'PAGE_SWAP',
@@ -8098,6 +10096,7 @@ window.demonCinematicWhatsPoint = () => {
 // Demon cinematic outcome: player loses
 window.demonCinematicLayDownAndRot = () => {
   if (state.runEnded) return
+  removeSpecialActionsByName(['Just lay down and rot'])
   openStoryDialog(
     'ENDING',
     'Terrible Ending — Lay Down and Rot',
@@ -8107,7 +10106,7 @@ window.demonCinematicLayDownAndRot = () => {
       'The world keeps moving without you.'
     ],
     [
-      { label: 'The end.', onClick: 'window.endRunToRebirth()' }
+      { label: 'Continue.', onClick: 'window.closeStoryDialog()' }
     ],
     {
       mode: 'PAGE_SWAP',
@@ -8634,7 +10633,7 @@ function renderCombat(container) {
             const cooldownMs = getPlayerMoveCooldownMs(moveId)
             const disabled = isPlayerMoveDisabled(moveId)
             const preview = getMoveCombatPreview(moveId)
-            const metaText = preview ? `DMG: ${preview.damage} • Qi: ${preview.qiCost}` : ''
+            const metaText = preview ? `DMG: ${preview.damage}` : ''
             const cdTextValue = cooldownMs > 0 ? `Cooldown: ${escapeHtml(formatCooldownMs(cooldownMs))}` : '&nbsp;'
             const metaLine = metaText ? escapeHtml(metaText) : '&nbsp;'
             return `
@@ -8743,6 +10742,7 @@ let cropCount = 0
 let woodCount = 0
 
 window.rerollFate = () => {
+  if (!state.rebirthUpgrades?.canRerollFate) return
   if (state.rerollsRemaining <= 0) return
   
   state.rerollsRemaining--
@@ -8910,7 +10910,8 @@ window.sellCrops = () => {
   saveGame()
 }
 
-window.gatherHerbs = () => {
+window.gatherHerbsLegacy = () => {
+  try { playSfx('gather') } catch (_) {}
   if (!state.devIgnoreRequirements) {
     if (state.stamina < 2) return
     state.stamina -= 2
@@ -8921,12 +10922,12 @@ window.gatherHerbs = () => {
 
   const gained = 1 + Math.floor(Math.random() * 3)
   addToInventory({
-    name: 'Medicinal Herb',
+    name: 'Ginseng',
     kind: 'ingredient',
-    description: 'A common herb used for basic pills.',
+    description: 'A hardy root used in many formulas.',
     quantity: gained
   })
-  log(`You gather herbs. +${gained} Medicinal Herb.`)
+  log(`You gather herbs. +${gained} Ginseng.`)
 
   // Rare, one-time permanent herb.
   if (!state.mysteriousHerbFound && Math.random() < 0.03) {
@@ -8943,8 +10944,9 @@ window.gatherHerbs = () => {
   saveGame()
 }
 
-window.craftHerbPill = () => {
-  if (!consumeInventoryByName('Medicinal Herb', 5)) return
+window.craftHerbPillLegacy = () => {
+  try { playSfx('craft') } catch (_) {}
+  if (!consumeInventoryByName('Ginseng', 5)) return
   addToInventory({
     name: 'Herb Pill',
     kind: 'pill',
@@ -9053,6 +11055,15 @@ function updateTimedActionProgressOnly() {
     }
   }
 
+  // Herbalism progress bars
+  const herbalismFills = document.querySelectorAll('.herbalism-progress-fill[data-progress-key]')
+  for (const fill of herbalismFills) {
+    const key = String(fill.getAttribute('data-progress-key') || '')
+    if (!key) continue
+    const pct = `${Math.max(0, Math.min(100, Math.floor(getActionProgress(key) * 100)))}%`
+    fill.style.width = pct
+  }
+
   // Quest panel step progress fill
   const questFills = document.querySelectorAll('.quest-step-fill[data-progress-key]')
   for (const fill of questFills) {
@@ -9070,13 +11081,15 @@ function getActionKey(type, action) {
 function getActionDurationMs(type, action) {
   const name = String(action?.name || '')
 
+  const repeatableReductionMs = getRebirthRepeatableDurationReductionMs()
+
   // Repeatable: 2s completion timers
   if (type === 'repeatable') {
-    if (name === 'Farm Crops') return 2000
-    if (name === 'Chop Wood') return 2000
-    if (name === 'Sell Crops') return 1000
-    if (name === 'Sell Wood') return 1000
-    if (name === 'Grab Groceries') return 1000
+    if (name === 'Farm Crops') return Math.max(250, 2000 - repeatableReductionMs)
+    if (name === 'Chop Wood') return Math.max(250, 2000 - repeatableReductionMs)
+    if (name === 'Sell Crops') return Math.max(250, 1000 - repeatableReductionMs)
+    if (name === 'Sell Wood') return Math.max(250, 1000 - repeatableReductionMs)
+    if (name === 'Grab Groceries') return Math.max(250, 1000 - repeatableReductionMs)
     return 0
   }
 
@@ -9180,7 +11193,12 @@ function setActionCooldownSeconds(actionKey, seconds) {
   const s = Number(seconds)
   if (!Number.isFinite(s) || s <= 0) return
   ensureButtonCooldownsState()
-  state.buttonCooldowns[actionKey] = Date.now() + Math.floor(s * 1000)
+  let effective = s
+  // Rebirth node: special action cooldown reduction.
+  if (String(actionKey || '').startsWith('special:')) {
+    effective = Math.max(0.1, effective - getRebirthSpecialCooldownReductionSeconds())
+  }
+  state.buttonCooldowns[actionKey] = Date.now() + Math.floor(effective * 1000)
 }
 
 function finishTimedActionWithOptions(key, opts) {
@@ -9409,6 +11427,23 @@ window.advanceRealm = () => {
     const newRealm = getCurrentCultivationRealm()
     updateCombatStats() // Update strength and health with new realm multipliers
     log(`🌟 BREAKTHROUGH! You advance to ${newRealm.major} ${newRealm.sub}!`)
+
+    try { syncBestMajorRealm() } catch (_) {}
+    try { saveMeta() } catch (_) {}
+    try { leaderboardScheduleSync('major_breakthrough') } catch (_) {}
+
+    // Run ends only when reaching Major Realm 20, or Demonic Major Realm 10.
+    const majorNumber = clampNonNegativeInt(state.cultivationMajorIndex) + 1
+    if (!state.isDemonPath && majorNumber >= 20) {
+      log('You have reached the 20th Major Realm. Your run ends.')
+      window.endRunToRebirth({ actionName: 'Reincarnate.' })
+      return
+    }
+    if (state.isDemonPath && majorNumber >= 10) {
+      log('You have reached the 10th Demonic Major Realm. Your run ends.')
+      window.endRunToRebirth({ actionName: 'Reincarnate.' })
+      return
+    }
   } else {
     // Minor advancement
     state.cultivationSubIndex++
@@ -9902,13 +11937,13 @@ window.heavensClashImmortalGod = () => {
   state.questReturnPhase = state.phase
   closePanelsForCombatStart()
   state.inCombat = true
-  state.enemy = {
+  state.enemy = applyHardModeEnemyScaling({
     name: 'Immortal God',
     icon: '👁️',
     health: bossHp,
     maxHealth: bossHp,
     strength: bossStr
-  }
+  })
   state.phase = 'COMBAT'
   ensureCombatLoop()
 
@@ -10039,7 +12074,7 @@ window.heavensFinalConfrontationDemonKing = () => {
       '☠️ Final Result: You die by the Demon King\'s hand.'
     ],
     [
-      { label: 'The end.', onClick: 'window.heavensEndingEndRun()' }
+      { label: 'Continue.', onClick: 'window.closeStoryDialog()' }
     ],
     {
       mode: 'PAGE_SWAP',
@@ -10054,7 +12089,7 @@ window.heavensFinalConfrontationDemonKing = () => {
 }
 
 window.heavensEndingEndRun = () => {
-  window.endRunToRebirth()
+  window.closeStoryDialog()
 }
 
 // ============================================================================
@@ -13075,13 +15110,13 @@ window.cloudStoryBattleStarts = () => {
   state.questReturnPhase = state.phase
   closePanelsForCombatStart()
   state.inCombat = true
-  state.enemy = {
+  state.enemy = applyHardModeEnemyScaling({
     name: 'Outer Disciple',
     icon: '🥋',
     health: stats.health,
     maxHealth: stats.health,
     strength: stats.damage
-  }
+  })
   state.phase = 'COMBAT'
   ensureCombatLoop()
   render()
@@ -13496,13 +15531,13 @@ function startCloudTriSectBossCombat() {
   state.questReturnPhase = state.phase
   closePanelsForCombatStart()
   state.inCombat = true
-  state.enemy = {
+  state.enemy = applyHardModeEnemyScaling({
     name: 'Tri-Sect Fusion',
     icon: '🔥',
     health: bossHp,
     maxHealth: bossHp,
     strength: bossStr
-  }
+  })
   state.phase = 'COMBAT'
   ensureCombatLoop()
 
@@ -14204,13 +16239,13 @@ window.sectChallengeRank = (layerKey, rankNumber) => {
   state.questReturnPhase = state.phase
   closePanelsForCombatStart()
   state.inCombat = true
-  state.enemy = {
+  state.enemy = applyHardModeEnemyScaling({
     name: getSectPyramidRankLabel(c.layer, c.rank),
     icon: c.layer === 'leader' ? '🏯' : '🥋',
     health: stats.health,
     maxHealth: stats.health,
     strength: stats.damage
-  }
+  })
   state.phase = 'COMBAT'
   ensureCombatLoop()
   render()
@@ -14309,13 +16344,13 @@ function startCloudCoalitionWarCombat(enemyDef) {
   const maxHp = Math.max(1, clampNonNegativeInt(enemyDef.maxHealth ?? enemyDef.health))
   const str = Math.max(1, clampNonNegativeInt(enemyDef.strength))
 
-  state.enemy = {
+  state.enemy = applyHardModeEnemyScaling({
     name: String(enemyDef.name || 'Coalition Enemy'),
     icon: String(enemyDef.icon || '⚔️'),
     health: hp,
     maxHealth: maxHp,
     strength: str
-  }
+  })
 
   state.phase = 'COMBAT'
   ensureCombatLoop()
@@ -14803,12 +16838,12 @@ function startQuestCombat(mode) {
               ? 'Corrupted Cultist'
               : 'Quest Enemy'
 
-  state.enemy = {
+  state.enemy = applyHardModeEnemyScaling({
     name: enemyName,
     health: stats.health,
     maxHealth: stats.health,
     strength: stats.strength
-  }
+  })
   state.phase = 'COMBAT'
   ensureCombatLoop()
   render()
@@ -14894,7 +16929,10 @@ function completeQuest() {
   // Bonus drops: small chance for an extra item reward.
   // Keep it simple and deterministic enough to feel consistent.
   const major = (Number.isFinite(state.cultivationMajorIndex) ? state.cultivationMajorIndex : 0) + 1
-  const bonusChance = Math.max(0, Math.min(0.40, 0.12 + (major * 0.01)))
+  const qUp = normalizeRebirthUpgrades(state.rebirthUpgrades)
+  state.rebirthUpgrades = qUp
+  const bonusFromRebirth = 0.01 * clampNonNegativeInt(qUp.questDropChanceLevel)
+  const bonusChance = Math.max(0, Math.min(0.90, 0.12 + (major * 0.01) + bonusFromRebirth))
   if (Math.random() < bonusChance) {
     const catalog = getPillCatalog().filter(p => p && p.file !== 'death_pill.png')
     const pick = catalog.length ? catalog[Math.floor(Math.random() * catalog.length)] : null
@@ -14910,7 +16948,6 @@ function completeQuest() {
       log(`Bonus reward: ${String(pick.name || 'Pill')}.`)
     }
   }
-
   render()
   saveGame()
 }
@@ -15107,11 +17144,38 @@ function renderMovesPanel() {
 
 function renderMoveListItemHtml(moveId) {
   const label = getMoveDisplayName(moveId)
+  const meta = getMoveListMetaText(moveId)
   return `
     <div class="moves-row">
       <div class="moves-row-label">${escapeHtml(label)}</div>
+      ${meta ? `<div class="moves-row-meta">${escapeHtml(meta)}</div>` : ''}
     </div>
   `
+}
+
+function getMoveListMetaText(moveId) {
+  const parts = []
+  const preview = getMoveCombatPreview(moveId)
+  if (preview && Number.isFinite(preview.damage)) parts.push(`DMG: ${preview.damage}`)
+
+  const cd = getMoveBaseCooldownMs(moveId)
+  if (cd > 0) parts.push(`CD: ${formatCooldownMs(cd)}`)
+
+  return parts.join(' • ')
+}
+
+function getMoveBaseCooldownMs(moveId) {
+  const id = String(moveId || '')
+  if (!id) return 0
+  if (BASIC_MOVES[id]) return clampNonNegativeNumber(BASIC_MOVES[id].cooldownMs)
+  if (id === 'qiBlast') return clampNonNegativeNumber(QI_BLAST_MOVE.cooldownMs)
+  if (id.startsWith('manual:')) {
+    const name = id.slice('manual:'.length)
+    const move = getAvailableManualMoves().find(m => m.name === name)
+    if (!move) return 0
+    return clampNonNegativeNumber(move.cooldown) * 1000
+  }
+  return 0
 }
 
 function getMoveDisplayName(moveId) {
@@ -15222,6 +17286,85 @@ function renderRebirthTreeHtml() {
   const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
   state.rebirthUpgrades = u
 
+  const resetProgress = clampNonNegativeInt(u.resetUnlockProgress)
+  const resetStep = Math.floor(resetProgress / 10)
+  const resetNext = Math.min(100, resetProgress + 10)
+  const resetCost = 5
+
+  const qiLvl = clampNonNegativeInt(u.qiMultiplierLevel)
+  const qiMult = 1 + (0.2 * qiLvl)
+  const qiCost = Math.max(1, Math.ceil(1 * Math.pow(1.5, qiLvl)))
+
+  const herbSpeedLvl = clampNonNegativeInt(u.herbGatherSpeedLevel)
+  const herbSpeedPct = herbSpeedLvl * 5
+  const herbSpeedCost = getRebirthInfiniteNodeCost(herbSpeedLvl)
+
+  const herbMultiLvl = clampNonNegativeInt(u.herbMultiGatherLevel)
+  const herbMultiPct = herbMultiLvl * 10
+  const herbsPerGather = 1 + Math.floor(herbMultiLvl / 10)
+  const herbMultiCost = getRebirthInfiniteNodeCost(herbMultiLvl)
+
+  const strLvl = clampNonNegativeInt(u.strengthMultiplierLevel)
+  const strMult = 1 + (0.1 * strLvl)
+  const strCost = getRebirthInfiniteNodeCost(strLvl)
+
+  const hpLvl = clampNonNegativeInt(u.healthMultiplierLevel)
+  const hpMult = 1 + (0.1 * hpLvl)
+  const hpCost = getRebirthInfiniteNodeCost(hpLvl)
+
+  const specialLvl = clampNonNegativeInt(u.specialCooldownLevel)
+  const specialCdRed = 0.5 * specialLvl
+  const specialCost = getRebirthInfiniteNodeCost(specialLvl)
+
+  const repeatLvl = clampNonNegativeInt(u.repeatableSpeedLevel)
+  const repeatRed = 0.25 * repeatLvl
+  const repeatCost = getRebirthInfiniteNodeCost(repeatLvl)
+
+  const autoGatherLvl = clampNonNegativeInt(u.autoGatherLevel)
+  const autoGatherPct = autoGatherLvl * 5
+  const autoGatherCost = getRebirthInfiniteNodeCost(autoGatherLvl)
+
+  const autoCraftLvl = clampNonNegativeInt(u.autoCraftLevel)
+  const autoCraftPct = autoCraftLvl * 5
+  const autoCraftCost = getRebirthInfiniteNodeCost(autoCraftLvl)
+
+  const pillSpeedLvl = clampNonNegativeInt(u.pillCraftSpeedLevel)
+  const pillRed = 0.25 * pillSpeedLvl
+  const pillSpeedCost = getRebirthInfiniteNodeCost(pillSpeedLvl)
+
+  const minRootsLvl = clampNonNegativeInt(u.minRootBonusLevel)
+  const minRootsCost = getRebirthInfiniteNodeCost(minRootsLvl)
+
+  const rootLuckLvl = clampNonNegativeInt(u.rootLuckLevel)
+  const rootLuckCost = getRebirthInfiniteNodeCost(rootLuckLvl)
+
+  const maxRootsBonusLvl = clampNonNegativeInt(u.maxRootBonusLevel)
+  const maxRootsBonusCost = getRebirthInfiniteNodeCost(maxRootsBonusLvl)
+
+  const moreRerollsLvl = clampNonNegativeInt(u.extraRerollsLevel)
+  const moreRerollsCost = getRebirthInfiniteNodeCost(moreRerollsLvl)
+
+  const bloodlineLuckLvl = clampNonNegativeInt(u.bloodlineLuckLevel)
+  const bloodlineLuckCost = getRebirthInfiniteNodeCost(bloodlineLuckLvl)
+
+  const multiAffinityLuckLvl = clampNonNegativeInt(u.multiAffinityLuckLevel)
+  const multiAffinityLuckCost = getRebirthInfiniteNodeCost(multiAffinityLuckLvl)
+
+  const alignLuckLvl = clampNonNegativeInt(u.affinityAlignmentLuckLevel)
+  const alignLuckCost = getRebirthInfiniteNodeCost(alignLuckLvl)
+
+  const storyLuckLvl = clampNonNegativeInt(u.storyLuckLuckLevel)
+  const storyLuckPct = storyLuckLvl * 5
+  const storyLuckCost = getRebirthInfiniteNodeCost(storyLuckLvl)
+
+  const stoneRpLvl = clampNonNegativeInt(u.spiritStoneRpMultLevel)
+  const stoneRpMult = getRebirthSpiritStoneRpMultiplier()
+  const stoneRpCost = getRebirthInfiniteNodeCost(stoneRpLvl, 3)
+
+  const questDropLvl = clampNonNegativeInt(u.questDropChanceLevel)
+  const questDropPct = questDropLvl * 1
+  const questDropCost = getRebirthInfiniteNodeCost(questDropLvl)
+
   const nodes = [
     {
       id: 'start',
@@ -15232,6 +17375,136 @@ function renderRebirthTreeHtml() {
       purchased: true
     },
     {
+      id: 'qi_mult',
+      title: `Qi ${formatMultiplier(qiMult)}`,
+      cost: qiCost,
+      pos: { x: 580, y: 260 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Current: ${formatMultiplier(qiMult)} (lvl ${qiLvl}). Next costs ${qiCost} RP.`
+    },
+    {
+      id: 'herb_speed',
+      title: `Herb +${formatNumber(herbSpeedPct)}%`,
+      cost: herbSpeedCost,
+      pos: { x: 760, y: 120 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Faster herb gathering (+5% per buy). Current: +${formatNumber(herbSpeedPct)}%.`
+    },
+    {
+      id: 'herb_multi',
+      title: `Herbs ×${formatNumber(herbsPerGather)}`,
+      cost: herbMultiCost,
+      pos: { x: 420, y: 120 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +10% per buy. At 100% you gather 2, at 200% you gather 3, etc. Current: ${formatNumber(herbMultiPct)}% → ${formatNumber(herbsPerGather)} herbs.`
+    },
+    {
+      id: 'min_roots_plus',
+      title: `Min +${formatNumber(minRootsLvl)}`,
+      cost: minRootsCost,
+      pos: { x: 240, y: 260 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +1 minimum roots per buy. Current bonus: +${formatNumber(minRootsLvl)}.`
+    },
+    {
+      id: 'root_luck',
+      title: `Root Luck +${formatNumber(rootLuckLvl)}`,
+      cost: rootLuckCost,
+      pos: { x: 240, y: 100 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Increases odds of rolling more roots within your min/max. +1 luck per buy.`
+    },
+    {
+      id: 'max_roots_plus',
+      title: `Max +${formatNumber(maxRootsBonusLvl)}`,
+      cost: maxRootsBonusCost,
+      pos: { x: 240, y: 580 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +1 maximum roots per buy. Current bonus: +${formatNumber(maxRootsBonusLvl)}.`
+    },
+    {
+      id: 'auto_gather',
+      title: `Auto G ${formatNumber(autoGatherPct)}%`,
+      cost: autoGatherCost,
+      pos: { x: 240, y: 420 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +5% per buy. Unlock at 100%. Current: ${formatNumber(autoGatherPct)}%.`
+    },
+    {
+      id: 'auto_craft',
+      title: `Auto C ${formatNumber(autoCraftPct)}%`,
+      cost: autoCraftCost,
+      pos: { x: 920, y: 420 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +5% per buy. Unlock at 100%. Current: ${formatNumber(autoCraftPct)}%.`
+    },
+    {
+      id: 'pill_speed',
+      title: `Pill -${pillRed.toFixed(2)}s`,
+      cost: pillSpeedCost,
+      pos: { x: 920, y: 580 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Pill crafting faster (0.25s per buy). Current: -${pillRed.toFixed(2)}s.`
+    },
+    {
+      id: 'str_mult',
+      title: `STR ${formatMultiplier(strMult)}`,
+      cost: strCost,
+      pos: { x: 760, y: 580 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Strength multiplier (+0.1× per buy). Current: ${formatMultiplier(strMult)}.`
+    },
+    {
+      id: 'hp_mult',
+      title: `HP ${formatMultiplier(hpMult)}`,
+      cost: hpCost,
+      pos: { x: 1040, y: 580 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Health multiplier (+0.1× per buy). Current: ${formatMultiplier(hpMult)}.`
+    },
+    {
+      id: 'special_cd',
+      title: `Spec -${specialCdRed.toFixed(1)}s`,
+      cost: specialCost,
+      pos: { x: 80, y: 520 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Special action cooldowns reduced by 0.5s per buy. Current: -${specialCdRed.toFixed(1)}s.`
+    },
+    {
+      id: 'repeat_speed',
+      title: `Rep -${repeatRed.toFixed(2)}s`,
+      cost: repeatCost,
+      pos: { x: 80, y: 360 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Repeatable actions complete faster by 0.25s per buy. Current: -${repeatRed.toFixed(2)}s.`
+    },
+    {
       id: 'reroll',
       title: 'Reroll',
       cost: 20,
@@ -15240,6 +17513,76 @@ function renderRebirthTreeHtml() {
       purchased: Boolean(u.canRerollFate),
       canBuy: () => !u.canRerollFate,
       apply: () => { u.canRerollFate = true }
+    },
+    {
+      id: 'more_rerolls',
+      title: `Rerolls +${formatNumber(moreRerollsLvl)}`,
+      cost: moreRerollsCost,
+      pos: { x: 920, y: 260 },
+      prereq: ['reroll'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Grants +1 fate reroll per buy.`
+    },
+    {
+      id: 'bloodline_luck',
+      title: `BL Luck +${formatNumber(bloodlineLuckLvl)}`,
+      cost: bloodlineLuckCost,
+      pos: { x: 1040, y: 120 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Better bloodline luck (+1 per buy).`
+    },
+    {
+      id: 'multi_affinity_luck',
+      title: `Aff +${formatNumber(multiAffinityLuckLvl)}`,
+      cost: multiAffinityLuckCost,
+      pos: { x: 1040, y: 260 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. Increases luck of rolling multiple affinities (+1 per buy).`
+    },
+    {
+      id: 'affinity_alignment',
+      title: `Align +${formatNumber(alignLuckLvl)}%`,
+      cost: alignLuckCost,
+      pos: { x: 1040, y: 420 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +1% chance per buy to roll higher affinity alignment (higher scores).`
+    },
+    {
+      id: 'story_luck',
+      title: `Story +${formatNumber(storyLuckPct)}%`,
+      cost: storyLuckCost,
+      pos: { x: 1040, y: 760 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +5% chance per buy to roll higher Story Luck.`
+    },
+    {
+      id: 'spiritstone_rp',
+      title: `Stones ${formatMultiplier(stoneRpMult)}`,
+      cost: stoneRpCost,
+      pos: { x: 760, y: 760 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. More RP from spirit stones. Each buy adds +2×. Cost scales by 3×.`
+    },
+    {
+      id: 'quest_drop',
+      title: `Quest +${formatNumber(questDropPct)}%`,
+      cost: questDropCost,
+      pos: { x: 420, y: 760 },
+      prereq: ['start'],
+      purchased: false,
+      canBuy: () => true,
+      tooltip: `Infinite. +1% item drop chance for quest bonus drops per buy.`
     },
     {
       id: 'bias1',
@@ -15318,6 +17661,21 @@ function renderRebirthTreeHtml() {
       apply: () => { u.maxRootCount = Math.max(u.maxRootCount, 7) }
     },
 
+    // Unlocks the ability to manually end a run (Settings panel) once fully upgraded.
+    {
+      id: 'reset',
+      title: `Reset ${resetProgress}%`,
+      cost: resetProgress >= 100 ? 0 : resetCost,
+      pos: { x: 620, y: 660 },
+      prereq: ['bias3', 'max7'],
+      purchased: resetProgress >= 100,
+      canBuy: () => resetProgress < 100,
+      apply: () => { u.resetUnlockProgress = Math.max(u.resetUnlockProgress, resetNext) },
+      tooltip: resetProgress >= 100
+        ? 'Reset unlocked (100%).'
+        : `Upgrade to ${resetNext}% (cost ${resetCost}).`
+    },
+
     // Placeholder expansion nodes (no effects yet)
     { id: 'p_a1', title: 'A1', cost: 0, pos: { x: 160, y: 520 }, prereq: ['max6'], purchased: false },
     { id: 'p_a2', title: 'A2', cost: 0, pos: { x: 80, y: 640 }, prereq: ['p_a1'], purchased: false },
@@ -15344,6 +17702,26 @@ function renderRebirthTreeHtml() {
 
   const edges = [
     ['start', 'reroll'],
+    ['start', 'qi_mult'],
+    ['start', 'herb_speed'],
+    ['start', 'herb_multi'],
+    ['start', 'min_roots_plus'],
+    ['start', 'root_luck'],
+    ['start', 'max_roots_plus'],
+    ['start', 'auto_gather'],
+    ['start', 'auto_craft'],
+    ['start', 'pill_speed'],
+    ['start', 'str_mult'],
+    ['start', 'hp_mult'],
+    ['start', 'special_cd'],
+    ['start', 'repeat_speed'],
+    ['start', 'bloodline_luck'],
+    ['start', 'multi_affinity_luck'],
+    ['start', 'affinity_alignment'],
+    ['start', 'story_luck'],
+    ['start', 'spiritstone_rp'],
+    ['start', 'quest_drop'],
+    ['reroll', 'more_rerolls'],
     ['reroll', 'bias1'],
     ['bias1', 'bias2'],
     ['bias2', 'bias3'],
@@ -15351,6 +17729,9 @@ function renderRebirthTreeHtml() {
     ['min2', 'min3'],
     ['start', 'max6'],
     ['max6', 'max7'],
+
+    ['bias3', 'reset'],
+    ['max7', 'reset'],
 
     // Placeholder edges
     ['max6', 'p_a1'],
@@ -15404,17 +17785,19 @@ function renderRebirthTreeHtml() {
     const locked = !prereqsMet(n)
     const afford = canAfford(n)
     const canBuy = typeof n.canBuy === 'function' ? Boolean(n.canBuy()) : !purchased
-    const disabled = purchased || locked || !afford || !canBuy || (clampNonNegativeInt(n.cost) <= 0)
-    const onclick = clampNonNegativeInt(n.cost) > 0 ? `window.buyRebirthNode(${JSON.stringify(String(n.id))})` : ''
+    const clickable = true
+    const onclick = `window.openRebirthNodeModal(${JSON.stringify(String(n.id))})`
+    const tip = String(n.tooltip || n.title || '')
+    const iconSrc = escapeHtml(String(getRebirthNodeIconSrc(n.id) || ''))
     return `
       <button
         class="rebirth-node ${purchased ? 'purchased' : ''} ${locked ? 'locked' : ''} ${(!locked && !purchased && afford && canBuy) ? 'available' : ''}"
         style="left:${n.pos.x}px; top:${n.pos.y}px; width:${nodeSize}px; height:${nodeSize}px;"
-        ${onclick ? `onclick="${escapeHtml(onclick)}"` : ''}
-        ${disabled ? 'disabled' : ''}
-        title="${escapeHtml(String(n.title || ''))}"
+        ${clickable ? `onclick="${escapeHtml(onclick)}"` : ''}
+        title="${escapeHtml(tip)}"
         type="button"
       >
+        <img class="rebirth-node-icon" src="${iconSrc}" alt="" />
         <div class="rebirth-node-label">${escapeHtml(String(n.title || ''))}</div>
       </button>
     `.trim()
@@ -15439,6 +17822,22 @@ function renderRebirthTreeHtml() {
 function ensureRebirthTreePanHandlers() {
   const el = document.querySelector('#shop-panel .rebirth-tree-scroll')
   if (!el) return
+
+  // Restore last known scroll position (render() rebuilds the shop panel DOM).
+  try {
+    if (!state.rebirthTreeScroll || typeof state.rebirthTreeScroll !== 'object') {
+      state.rebirthTreeScroll = { left: 0, top: 0 }
+    }
+    const wantL = clampNonNegativeInt(state.rebirthTreeScroll.left)
+    const wantT = clampNonNegativeInt(state.rebirthTreeScroll.top)
+    // Only force on first bind per element; after that the user can scroll normally.
+    if (el.dataset && el.dataset.panRestored !== '1') {
+      el.scrollLeft = wantL
+      el.scrollTop = wantT
+      el.dataset.panRestored = '1'
+    }
+  } catch (_) {}
+
   if (el.dataset && el.dataset.panBound === '1') return
   if (el.dataset) el.dataset.panBound = '1'
 
@@ -15469,7 +17868,20 @@ function ensureRebirthTreePanHandlers() {
     const dy = ev.clientY - startY
     el.scrollLeft = startScrollLeft - dx
     el.scrollTop = startScrollTop - dy
+    try {
+      if (!state.rebirthTreeScroll || typeof state.rebirthTreeScroll !== 'object') state.rebirthTreeScroll = { left: 0, top: 0 }
+      state.rebirthTreeScroll.left = clampNonNegativeInt(el.scrollLeft)
+      state.rebirthTreeScroll.top = clampNonNegativeInt(el.scrollTop)
+    } catch (_) {}
     ev.preventDefault()
+  }
+
+  const onScroll = () => {
+    try {
+      if (!state.rebirthTreeScroll || typeof state.rebirthTreeScroll !== 'object') state.rebirthTreeScroll = { left: 0, top: 0 }
+      state.rebirthTreeScroll.left = clampNonNegativeInt(el.scrollLeft)
+      state.rebirthTreeScroll.top = clampNonNegativeInt(el.scrollTop)
+    } catch (_) {}
   }
 
   const end = () => {
@@ -15482,6 +17894,7 @@ function ensureRebirthTreePanHandlers() {
   el.addEventListener('pointerup', end)
   el.addEventListener('pointercancel', end)
   el.addEventListener('pointerleave', end)
+  el.addEventListener('scroll', onScroll, { passive: true })
 }
 
 window.buyRebirthNode = (nodeId) => {
@@ -15491,8 +17904,171 @@ window.buyRebirthNode = (nodeId) => {
   const pts = clampNonNegativeInt(state.rebirthPoints || 0)
   const u = normalizeRebirthUpgrades(state.rebirthUpgrades)
 
+  const qiLvl = clampNonNegativeInt(u.qiMultiplierLevel)
+  const qiCost = Math.max(1, Math.ceil(1 * Math.pow(1.5, qiLvl)))
+
+  const herbSpeedLvl = clampNonNegativeInt(u.herbGatherSpeedLevel)
+  const herbSpeedCost = getRebirthInfiniteNodeCost(herbSpeedLvl)
+
+  const herbMultiLvl = clampNonNegativeInt(u.herbMultiGatherLevel)
+  const herbMultiCost = getRebirthInfiniteNodeCost(herbMultiLvl)
+
+  const autoGatherLvl = clampNonNegativeInt(u.autoGatherLevel)
+  const autoGatherCost = getRebirthInfiniteNodeCost(autoGatherLvl)
+
+  const autoCraftLvl = clampNonNegativeInt(u.autoCraftLevel)
+  const autoCraftCost = getRebirthInfiniteNodeCost(autoCraftLvl)
+
+  const pillSpeedLvl = clampNonNegativeInt(u.pillCraftSpeedLevel)
+  const pillSpeedCost = getRebirthInfiniteNodeCost(pillSpeedLvl)
+
+  const strLvl = clampNonNegativeInt(u.strengthMultiplierLevel)
+  const strCost = getRebirthInfiniteNodeCost(strLvl)
+
+  const hpLvl = clampNonNegativeInt(u.healthMultiplierLevel)
+  const hpCost = getRebirthInfiniteNodeCost(hpLvl)
+
+  const specialLvl = clampNonNegativeInt(u.specialCooldownLevel)
+  const specialCost = getRebirthInfiniteNodeCost(specialLvl)
+
+  const repeatLvl = clampNonNegativeInt(u.repeatableSpeedLevel)
+  const repeatCost = getRebirthInfiniteNodeCost(repeatLvl)
+
+  const minRootsLvl = clampNonNegativeInt(u.minRootBonusLevel)
+  const minRootsCost = getRebirthInfiniteNodeCost(minRootsLvl)
+
+  const rootLuckLvl = clampNonNegativeInt(u.rootLuckLevel)
+  const rootLuckCost = getRebirthInfiniteNodeCost(rootLuckLvl)
+
+  const maxRootsBonusLvl = clampNonNegativeInt(u.maxRootBonusLevel)
+  const maxRootsBonusCost = getRebirthInfiniteNodeCost(maxRootsBonusLvl)
+
+  const moreRerollsLvl = clampNonNegativeInt(u.extraRerollsLevel)
+  const moreRerollsCost = getRebirthInfiniteNodeCost(moreRerollsLvl)
+
+  const bloodlineLuckLvl = clampNonNegativeInt(u.bloodlineLuckLevel)
+  const bloodlineLuckCost = getRebirthInfiniteNodeCost(bloodlineLuckLvl)
+
+  const multiAffinityLuckLvl = clampNonNegativeInt(u.multiAffinityLuckLevel)
+  const multiAffinityLuckCost = getRebirthInfiniteNodeCost(multiAffinityLuckLvl)
+
+  const alignLuckLvl = clampNonNegativeInt(u.affinityAlignmentLuckLevel)
+  const alignLuckCost = getRebirthInfiniteNodeCost(alignLuckLvl)
+
+  const storyLuckLvl = clampNonNegativeInt(u.storyLuckLuckLevel)
+  const storyLuckCost = getRebirthInfiniteNodeCost(storyLuckLvl)
+
+  const stoneRpLvl = clampNonNegativeInt(u.spiritStoneRpMultLevel)
+  const stoneRpCost = getRebirthInfiniteNodeCost(stoneRpLvl, 3)
+
+  const questDropLvl = clampNonNegativeInt(u.questDropChanceLevel)
+  const questDropCost = getRebirthInfiniteNodeCost(questDropLvl)
+
   // Define the same effects as renderRebirthTreeHtml(), in a minimal map.
   const effects = {
+    qi_mult: {
+      cost: qiCost,
+      canBuy: () => true,
+      apply: () => { u.qiMultiplierLevel = Math.max(0, qiLvl + 1) }
+    },
+    herb_speed: {
+      cost: herbSpeedCost,
+      canBuy: () => true,
+      apply: () => { u.herbGatherSpeedLevel = Math.max(0, herbSpeedLvl + 1) }
+    },
+    herb_multi: {
+      cost: herbMultiCost,
+      canBuy: () => true,
+      apply: () => { u.herbMultiGatherLevel = Math.max(0, herbMultiLvl + 1) }
+    },
+    auto_gather: {
+      cost: autoGatherCost,
+      canBuy: () => true,
+      apply: () => { u.autoGatherLevel = Math.max(0, autoGatherLvl + 1) }
+    },
+    auto_craft: {
+      cost: autoCraftCost,
+      canBuy: () => true,
+      apply: () => { u.autoCraftLevel = Math.max(0, autoCraftLvl + 1) }
+    },
+    pill_speed: {
+      cost: pillSpeedCost,
+      canBuy: () => true,
+      apply: () => { u.pillCraftSpeedLevel = Math.max(0, pillSpeedLvl + 1) }
+    },
+    str_mult: {
+      cost: strCost,
+      canBuy: () => true,
+      apply: () => { u.strengthMultiplierLevel = Math.max(0, strLvl + 1) }
+    },
+    hp_mult: {
+      cost: hpCost,
+      canBuy: () => true,
+      apply: () => { u.healthMultiplierLevel = Math.max(0, hpLvl + 1) }
+    },
+    special_cd: {
+      cost: specialCost,
+      canBuy: () => true,
+      apply: () => { u.specialCooldownLevel = Math.max(0, specialLvl + 1) }
+    },
+    repeat_speed: {
+      cost: repeatCost,
+      canBuy: () => true,
+      apply: () => { u.repeatableSpeedLevel = Math.max(0, repeatLvl + 1) }
+    },
+    min_roots_plus: {
+      cost: minRootsCost,
+      canBuy: () => true,
+      apply: () => { u.minRootBonusLevel = Math.max(0, minRootsLvl + 1) }
+    },
+    root_luck: {
+      cost: rootLuckCost,
+      canBuy: () => true,
+      apply: () => { u.rootLuckLevel = Math.max(0, rootLuckLvl + 1) }
+    },
+    max_roots_plus: {
+      cost: maxRootsBonusCost,
+      canBuy: () => true,
+      apply: () => { u.maxRootBonusLevel = Math.max(0, maxRootsBonusLvl + 1) }
+    },
+    more_rerolls: {
+      cost: moreRerollsCost,
+      canBuy: () => true,
+      apply: () => {
+        u.extraRerollsLevel = Math.max(0, moreRerollsLvl + 1)
+        state.rerollsRemaining = clampNonNegativeInt(state.rerollsRemaining) + 1
+      }
+    },
+    bloodline_luck: {
+      cost: bloodlineLuckCost,
+      canBuy: () => true,
+      apply: () => { u.bloodlineLuckLevel = Math.max(0, bloodlineLuckLvl + 1) }
+    },
+    multi_affinity_luck: {
+      cost: multiAffinityLuckCost,
+      canBuy: () => true,
+      apply: () => { u.multiAffinityLuckLevel = Math.max(0, multiAffinityLuckLvl + 1) }
+    },
+    affinity_alignment: {
+      cost: alignLuckCost,
+      canBuy: () => true,
+      apply: () => { u.affinityAlignmentLuckLevel = Math.max(0, alignLuckLvl + 1) }
+    },
+    story_luck: {
+      cost: storyLuckCost,
+      canBuy: () => true,
+      apply: () => { u.storyLuckLuckLevel = Math.max(0, storyLuckLvl + 1) }
+    },
+    spiritstone_rp: {
+      cost: stoneRpCost,
+      canBuy: () => true,
+      apply: () => { u.spiritStoneRpMultLevel = Math.max(0, stoneRpLvl + 1) }
+    },
+    quest_drop: {
+      cost: questDropCost,
+      canBuy: () => true,
+      apply: () => { u.questDropChanceLevel = Math.max(0, questDropLvl + 1) }
+    },
     reroll: { cost: 20, canBuy: () => !u.canRerollFate, apply: () => { u.canRerollFate = true } },
     bias1: { cost: 5, canBuy: () => u.bloodlineBias < 0.10, apply: () => { u.bloodlineBias = Math.max(u.bloodlineBias, 0.10) } },
     bias2: { cost: 12, canBuy: () => u.bloodlineBias < 0.25, apply: () => { u.bloodlineBias = Math.max(u.bloodlineBias, 0.25) } },
@@ -15500,10 +18076,39 @@ window.buyRebirthNode = (nodeId) => {
     min2: { cost: 8, canBuy: () => u.minRootCount < 2, apply: () => { u.minRootCount = Math.max(u.minRootCount, 2); if (u.maxRootCount < u.minRootCount) u.maxRootCount = u.minRootCount } },
     min3: { cost: 16, canBuy: () => u.minRootCount < 3, apply: () => { u.minRootCount = Math.max(u.minRootCount, 3); if (u.maxRootCount < u.minRootCount) u.maxRootCount = u.minRootCount } },
     max6: { cost: 10, canBuy: () => u.maxRootCount < 6, apply: () => { u.maxRootCount = Math.max(u.maxRootCount, 6) } },
-    max7: { cost: 18, canBuy: () => u.maxRootCount < 7, apply: () => { u.maxRootCount = Math.max(u.maxRootCount, 7) } }
+    max7: { cost: 18, canBuy: () => u.maxRootCount < 7, apply: () => { u.maxRootCount = Math.max(u.maxRootCount, 7) } },
+    reset: {
+      cost: (u.resetUnlockProgress >= 100) ? 0 : 5,
+      canBuy: () => u.resetUnlockProgress < 100,
+      apply: () => {
+        const cur = clampNonNegativeInt(u.resetUnlockProgress)
+        const next = Math.min(100, cur + 10)
+        u.resetUnlockProgress = Math.max(cur, next)
+      }
+    }
   }
 
   const prereq = {
+    qi_mult: ['start'],
+    herb_speed: ['start'],
+    herb_multi: ['start'],
+    auto_gather: ['start'],
+    auto_craft: ['start'],
+    pill_speed: ['start'],
+    str_mult: ['start'],
+    hp_mult: ['start'],
+    special_cd: ['start'],
+    repeat_speed: ['start'],
+    min_roots_plus: ['start'],
+    root_luck: ['start'],
+    max_roots_plus: ['start'],
+    more_rerolls: ['reroll'],
+    bloodline_luck: ['start'],
+    multi_affinity_luck: ['start'],
+    affinity_alignment: ['start'],
+    story_luck: ['start'],
+    spiritstone_rp: ['start'],
+    quest_drop: ['start'],
     reroll: ['start'],
     bias1: ['reroll'],
     bias2: ['bias1'],
@@ -15511,11 +18116,32 @@ window.buyRebirthNode = (nodeId) => {
     min2: ['start'],
     min3: ['min2'],
     max6: ['start'],
-    max7: ['max6']
+    max7: ['max6'],
+    reset: ['bias3', 'max7']
   }
 
   const purchased = {
     start: true,
+    qi_mult: false,
+    herb_speed: false,
+    herb_multi: false,
+    auto_gather: false,
+    auto_craft: false,
+    pill_speed: false,
+    str_mult: false,
+    hp_mult: false,
+    special_cd: false,
+    repeat_speed: false,
+    min_roots_plus: false,
+    root_luck: false,
+    max_roots_plus: false,
+    more_rerolls: false,
+    bloodline_luck: false,
+    multi_affinity_luck: false,
+    affinity_alignment: false,
+    story_luck: false,
+    spiritstone_rp: false,
+    quest_drop: false,
     reroll: Boolean(u.canRerollFate),
     bias1: u.bloodlineBias >= 0.10,
     bias2: u.bloodlineBias >= 0.25,
@@ -15523,7 +18149,8 @@ window.buyRebirthNode = (nodeId) => {
     min2: u.minRootCount >= 2,
     min3: u.minRootCount >= 3,
     max6: u.maxRootCount >= 6,
-    max7: u.maxRootCount >= 7
+    max7: u.maxRootCount >= 7,
+    reset: clampNonNegativeInt(u.resetUnlockProgress) >= 100
   }
 
   const reqs = Array.isArray(prereq[id]) ? prereq[id] : []
@@ -15536,6 +18163,8 @@ window.buyRebirthNode = (nodeId) => {
   if (cost <= 0) return
   if (pts < cost) return
   if (typeof eff.canBuy === 'function' && !eff.canBuy()) return
+
+  try { playSfx('rebirth') } catch (_) {}
 
   state.rebirthPoints = pts - cost
   try { eff.apply?.() } catch (_) {}
@@ -15644,15 +18273,13 @@ function isPlayerMoveDisabled(moveId) {
   if (getPlayerMoveCooldownMs(id) > 0) return true
 
   if (id === 'qiBlast') {
-    if (!isQiBlastUnlocked()) return true
-    return clampNonNegativeNumber(state.qi) < QI_BLAST_MOVE.qiCost
+    return !isQiBlastUnlocked()
   }
 
   if (id.startsWith('manual:')) {
     const name = id.slice('manual:'.length)
     const move = getAvailableManualMoves().find(m => m.name === name)
-    if (!move) return true
-    return clampNonNegativeNumber(state.qi) < clampNonNegativeNumber(move.qiCost)
+    return !move
   }
 
   return false
@@ -15666,29 +18293,25 @@ function getMoveCombatPreview(moveId) {
   if (BASIC_MOVES[id]) {
     const move = BASIC_MOVES[id]
     const damage = Math.floor(strength * clampNonNegativeNumber(move.damageMult))
-    const qiCost = clampNonNegativeNumber(move.qiCost)
-    return { damage, qiCost }
+    return { damage, qiCost: 0 }
   }
 
   if (id === 'qiBlast') {
     if (!isQiBlastUnlocked()) return null
     const move = QI_BLAST_MOVE
     const damage = Math.floor(strength * clampNonNegativeNumber(move.damageMult))
-    const qiCost = clampNonNegativeNumber(move.qiCost)
-    return { damage, qiCost }
+    return { damage, qiCost: 0 }
   }
 
   if (id.startsWith('manual:')) {
     const name = id.slice('manual:'.length)
     const move = getAvailableManualMoves().find(m => m.name === name)
     if (!move) return null
-
-    const qiCost = clampNonNegativeNumber(move.qiCost)
     const equippedType = getEquippedManualType()
     const affinityBonus = equippedType ? getAffinityBonus(equippedType) : 0
     const baseDamage = strength * clampNonNegativeNumber(move.damage)
     const damage = Math.floor(baseDamage * (1 + affinityBonus))
-    return { damage, qiCost }
+    return { damage, qiCost: 0 }
   }
 
   return null
@@ -15729,8 +18352,6 @@ function performPlayerMove(moveId, enemy) {
 
   if (BASIC_MOVES[id]) {
     const move = BASIC_MOVES[id]
-    if (clampNonNegativeNumber(state.qi) < move.qiCost) return
-    state.qi = clampNonNegativeNumber(state.qi) - move.qiCost
     const damage = Math.floor(clampNonNegativeNumber(state.strength) * move.damageMult)
     enemy.health = Math.max(0, clampNonNegativeNumber(enemy.health) - damage)
     state.playerCooldowns[id] = move.cooldownMs
@@ -15741,8 +18362,6 @@ function performPlayerMove(moveId, enemy) {
   if (id === 'qiBlast') {
     if (!isQiBlastUnlocked()) return
     const move = QI_BLAST_MOVE
-    if (clampNonNegativeNumber(state.qi) < move.qiCost) return
-    state.qi = clampNonNegativeNumber(state.qi) - move.qiCost
     const damage = Math.floor(clampNonNegativeNumber(state.strength) * move.damageMult)
     enemy.health = Math.max(0, clampNonNegativeNumber(enemy.health) - damage)
     state.playerCooldowns[id] = move.cooldownMs
@@ -15754,10 +18373,6 @@ function performPlayerMove(moveId, enemy) {
     const name = id.slice('manual:'.length)
     const move = getAvailableManualMoves().find(m => m.name === name)
     if (!move) return
-
-    const qiCost = clampNonNegativeNumber(move.qiCost)
-    if (clampNonNegativeNumber(state.qi) < qiCost) return
-    state.qi = clampNonNegativeNumber(state.qi) - qiCost
 
     const equippedType = getEquippedManualType()
     const affinityBonus = equippedType ? getAffinityBonus(equippedType) : 0
@@ -15994,6 +18609,19 @@ function enemyAutoAct(now = performance.now()) {
   }
 
   if (state.health <= 0) {
+    // Hard Mode: any defeat ends the run.
+    if (state.hardMode) {
+      state.health = 0
+      state.inCombat = false
+      state.enemy = null
+      state.combatContext = null
+      state.phase = state.questReturnPhase || 'FARMING'
+      state.questReturnPhase = null
+      ensureCombatLoop()
+      log('💀 You have been defeated in Hard Mode. Your run ends.')
+      window.endRunToRebirth()
+      return
+    }
     if (handleQuestCombatDefeat()) {
       return
     }
@@ -16290,6 +18918,28 @@ setInterval(() => {
     needsSave = true
   }
   updateShopCountdownTextsInPlace()
+
+  // Rebirth automation (auto gather / auto craft)
+  try {
+    const okPhase = state.phase !== 'INTRO_LOADING' && state.phase !== 'FATE_ROLL' && state.phase !== 'STORY_DIALOG'
+    if (!state.runEnded && !state.inCombat && okPhase) {
+      const gatherKey = 'herbalism:Gather Herbs'
+      if (isRebirthAutoGatherUnlocked() && !isActionRunning(gatherKey)) {
+        startHerbGatherTimed({ silent: true })
+        needsSave = true
+      }
+
+      const craftKey = 'herbalism:Craft Pill'
+      if (isRebirthAutoCraftUnlocked() && !isActionRunning(craftKey) && canAutoCraftSelectedPill()) {
+        const file = String(state.autoCraftPillFile || '')
+        const pill = getPillCatalog().find(p => String(p.file || '') === file)
+        if (pill && consumeRecipeForPillFile(file)) {
+          startHerbalismCraftTimed(pill, { ignoreRequirements: !!state.devIgnoreRequirements })
+          needsSave = true
+        }
+      }
+    }
+  } catch (_) {}
   
   if (needsRender) {
     render()
@@ -16523,11 +19173,20 @@ function installQaHooks() {
   }
 }
 if (!loadGame()) {
-  // New game: run intro loading flow before fate roll
-  state.phase = 'INTRO_LOADING'
-  state.playerName = ''
-  state.playerGender = null
-  state.intro = { progress: 0, step: 'loading', usernameDraft: '', hasAnimatedTitle: false }
+  // New game: if meta has an existing account identity, skip intro and go to Fate Roll.
+  try { applyMetaFromStorage() } catch (_) {}
+  const hasIdentity = Boolean(String(state.playerName || '').trim()) && (state.playerGender === 'male' || state.playerGender === 'female')
+  if (hasIdentity) {
+    state.phase = 'FATE_ROLL'
+    rollFate()
+    saveGame()
+  } else {
+    // Otherwise run intro loading flow before fate roll
+    state.phase = 'INTRO_LOADING'
+    state.playerName = ''
+    state.playerGender = null
+    state.intro = { progress: 0, step: 'loading', usernameDraft: '', hasAnimatedTitle: false }
+  }
 }
 
 // If we land on fate roll without rolled fate (older saves), roll once and persist.
@@ -16535,6 +19194,12 @@ if (state.phase === 'FATE_ROLL' && !state.bloodline) {
   rollFate()
   saveGame()
 }
+
+// Keep best-ever stats synced and (optionally) push to global leaderboard.
+try { syncBestMajorRealm() } catch (_) {}
+try { syncBestRebirthPoints() } catch (_) {}
+try { saveMeta() } catch (_) {}
+try { leaderboardScheduleSync('boot') } catch (_) {}
 
 installQaHooks()
 render()

@@ -7,6 +7,13 @@ dist/
 .env
 .vite_dev.pid
 
+# Playwright artifacts
+playwright-report/
+
+# Local debug/trace artifacts
+.internal/trace_extract/
+.internal/trace_extract2/
+
 # Downloaded on-demand (see share_cloudflare_tunnel.bat)
 .internal/bin/cloudflared.exe
 

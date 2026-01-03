@@ -45,3 +45,45 @@ Then:
 
 - Run `npm run build`
 - Upload the contents of `dist/` to your Pages branch/folder
+
+## Global leaderboards (Supabase)
+
+GitHub Pages is static hosting, so a "global leaderboard shared across devices" requires a backend.
+This project supports Supabase via simple HTTPS requests from the browser.
+
+### Cost
+
+Supabase has a free tier that is typically enough for small projects and early testing.
+If the game grows (lots of traffic/writes), you may eventually hit free-tier limits and need to pay.
+
+### 1) Create the table + policies
+
+In Supabase:
+
+- Create a new project
+- Go to **SQL Editor**
+- Run the script in `.internal/supabase_leaderboard.sql`
+
+This creates `public.leaderboard` and enables Row Level Security (RLS).
+
+Note: without player accounts/auth, the leaderboard is "honor system" (anyone can submit any username).
+
+### 2) Configure local development
+
+- Copy `.env.example` to `.env`
+- Fill in:
+	- `VITE_SUPABASE_URL`
+	- `VITE_SUPABASE_ANON_KEY`
+
+Then `npm run dev`.
+
+### 3) Configure GitHub Pages deploy
+
+This repo builds on GitHub Actions and deploys `dist/` to `gh-pages`.
+Vite only embeds `VITE_*` variables at build time, so you must set GitHub Secrets:
+
+- Repo → **Settings → Secrets and variables → Actions → New repository secret**
+	- `VITE_SUPABASE_URL`
+	- `VITE_SUPABASE_ANON_KEY`
+
+After that, push to `main` and the deployed site will have global leaderboards enabled.
