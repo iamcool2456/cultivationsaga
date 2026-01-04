@@ -2300,8 +2300,21 @@ function __readLeaderboardCfgOverrideFromWindow() {
 }
 
 function __sanitizeSupabaseUrl(raw) {
-  const url = String(raw || '').trim()
+  let url = String(raw || '').trim()
   if (!url) return ''
+
+  // Strip simple wrapping quotes (common when users paste values into secrets).
+  if ((url.startsWith('"') && url.endsWith('"')) || (url.startsWith("'") && url.endsWith("'"))) {
+    url = url.slice(1, -1).trim()
+  }
+  if (!url) return ''
+
+  // Accept schemeless Supabase URLs by assuming https.
+  if (!/^https?:\/\//i.test(url)) {
+    const looksLikeHost = /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(url)
+    if (looksLikeHost) url = `https://${url}`
+  }
+
   // Avoid accidentally accepting non-URLs.
   if (!/^https?:\/\//i.test(url)) return ''
   return url
@@ -2338,7 +2351,10 @@ function isLeaderboardConfigured() {
 // were not injected at build time. This does not add UI; it only exposes a helper.
 window.setLeaderboardConfig = (url, anonKey) => {
   const safeUrl = __sanitizeSupabaseUrl(url)
-  const key = String(anonKey || '').trim()
+  let key = String(anonKey || '').trim()
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim()
+  }
   if (!safeUrl || !key) return false
   try {
     localStorage.setItem(LEADERBOARD_CFG_STORAGE_URL_KEY, safeUrl)

@@ -15,6 +15,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,10 +31,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check Supabase config (no secrets)
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ]; then
+            echo "::warning::VITE_SUPABASE_URL is missing in this workflow run"
+          else
+            echo "::notice::VITE_SUPABASE_URL is present (length=${#VITE_SUPABASE_URL})"
+          fi
+          if [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "::warning::VITE_SUPABASE_ANON_KEY is missing in this workflow run"
+          else
+            echo "::notice::VITE_SUPABASE_ANON_KEY is present (length=${#VITE_SUPABASE_ANON_KEY})"
+          fi
+
       - name: Build
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
 
       - name: Deploy to gh-pages branch
