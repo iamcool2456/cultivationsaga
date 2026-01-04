@@ -79,7 +79,7 @@ Then `npm run dev`.
 
 ### 3) Configure GitHub Pages deploy
 
-This repo builds on GitHub Actions and deploys `dist/` to `gh-pages`.
+This repo builds on GitHub Actions and deploys `dist/` via the official GitHub Pages Actions pipeline.
 Vite only embeds `VITE_*` variables at build time, so you must set GitHub Secrets:
 
 - Repo → **Settings → Secrets and variables → Actions → New repository secret**
