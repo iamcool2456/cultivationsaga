@@ -79,7 +79,7 @@ Then `npm run dev`.
 
 ### 3) Configure GitHub Pages deploy
 
-This repo builds on GitHub Actions and deploys `dist/` via the official GitHub Pages Actions pipeline.
+This repo builds on GitHub Actions and deploys `dist/` by pushing it to the `gh-pages` branch.
 Vite only embeds `VITE_*` variables at build time, so you must set GitHub Secrets:
 
 - Repo → **Settings → Secrets and variables → Actions → New repository secret**
@@ -87,6 +87,8 @@ Vite only embeds `VITE_*` variables at build time, so you must set GitHub Secret
 	- `VITE_SUPABASE_ANON_KEY`
 
 After that, push to `main` and the deployed site will have global leaderboards enabled.
+
+Note: In GitHub, ensure **Settings → Pages → Build and deployment → Source** is set to **Deploy from a branch** and the branch is **gh-pages**.
 
 ### If the live site is still missing config
 
