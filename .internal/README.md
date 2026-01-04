@@ -87,3 +87,25 @@ Vite only embeds `VITE_*` variables at build time, so you must set GitHub Secret
 	- `VITE_SUPABASE_ANON_KEY`
 
 After that, push to `main` and the deployed site will have global leaderboards enabled.
+
+### If the live site is still missing config
+
+Vite only embeds `VITE_*` variables at build time. If GitHub Secrets weren't set (or a deploy happened before they were set), the deployed bundle may not have the Supabase URL/key.
+
+You have two lightweight override options that work on static hosting:
+
+- **Option A (recommended):** fix GitHub Secrets and redeploy.
+- **Option B (runtime override):** set the config in the browser and store it in `localStorage`.
+
+In the live site DevTools console, run:
+
+```js
+window.setLeaderboardConfig('https://YOUR_PROJECT.supabase.co', 'YOUR_ANON_KEY')
+```
+
+This stores values under:
+
+- `cultivationSagaSupabaseUrl`
+- `cultivationSagaSupabaseAnonKey`
+
+Then reopen the Leaderboards panel and hit Refresh.

@@ -2274,16 +2274,81 @@ function initializeManualMoveCooldowns() {
 
 const META_STORAGE_KEY = 'cultivationSagaMeta'
 
+const LEADERBOARD_CFG_STORAGE_URL_KEY = 'cultivationSagaSupabaseUrl'
+const LEADERBOARD_CFG_STORAGE_ANON_KEY = 'cultivationSagaSupabaseAnonKey'
+
+function __readLeaderboardCfgOverrideFromStorage() {
+  try {
+    const url = String(localStorage.getItem(LEADERBOARD_CFG_STORAGE_URL_KEY) || '').trim()
+    const anonKey = String(localStorage.getItem(LEADERBOARD_CFG_STORAGE_ANON_KEY) || '').trim()
+    return { url, anonKey }
+  } catch (_) {
+    return { url: '', anonKey: '' }
+  }
+}
+
+function __readLeaderboardCfgOverrideFromWindow() {
+  try {
+    const w = window
+    if (!w || typeof w !== 'object') return { url: '', anonKey: '' }
+    const url = String(w.__CS_SUPABASE_URL || w.__CULTIVATION_SAGA_SUPABASE_URL || '').trim()
+    const anonKey = String(w.__CS_SUPABASE_ANON_KEY || w.__CULTIVATION_SAGA_SUPABASE_ANON_KEY || '').trim()
+    return { url, anonKey }
+  } catch (_) {
+    return { url: '', anonKey: '' }
+  }
+}
+
+function __sanitizeSupabaseUrl(raw) {
+  const url = String(raw || '').trim()
+  if (!url) return ''
+  // Avoid accidentally accepting non-URLs.
+  if (!/^https?:\/\//i.test(url)) return ''
+  return url
+}
+
 function getLeaderboardConfig() {
   // Vite exposes VITE_* env vars to client bundles.
-  const url = String(import.meta?.env?.VITE_SUPABASE_URL ?? '').trim()
-  const anonKey = String(import.meta?.env?.VITE_SUPABASE_ANON_KEY ?? '').trim()
-  return { url, anonKey }
+  const envUrl = String(import.meta?.env?.VITE_SUPABASE_URL ?? '').trim()
+  const envAnonKey = String(import.meta?.env?.VITE_SUPABASE_ANON_KEY ?? '').trim()
+
+  const win = __readLeaderboardCfgOverrideFromWindow()
+  const stored = __readLeaderboardCfgOverrideFromStorage()
+
+  const url = __sanitizeSupabaseUrl(envUrl || win.url || stored.url)
+  const anonKey = String(envAnonKey || win.anonKey || stored.anonKey || '').trim()
+
+  const source = (envUrl && envAnonKey)
+    ? 'env'
+    : (win.url && win.anonKey)
+      ? 'window'
+      : (stored.url && stored.anonKey)
+        ? 'localStorage'
+        : ''
+
+  return { url, anonKey, source }
 }
 
 function isLeaderboardConfigured() {
   const cfg = getLeaderboardConfig()
   return Boolean(cfg.url && cfg.anonKey)
+}
+
+// Optional runtime helper for live static builds (e.g. GitHub Pages) where secrets
+// were not injected at build time. This does not add UI; it only exposes a helper.
+window.setLeaderboardConfig = (url, anonKey) => {
+  const safeUrl = __sanitizeSupabaseUrl(url)
+  const key = String(anonKey || '').trim()
+  if (!safeUrl || !key) return false
+  try {
+    localStorage.setItem(LEADERBOARD_CFG_STORAGE_URL_KEY, safeUrl)
+    localStorage.setItem(LEADERBOARD_CFG_STORAGE_ANON_KEY, key)
+  } catch (_) {
+    return false
+  }
+  try { leaderboardScheduleSync('set_config') } catch (_) {}
+  try { window.refreshLeaderboards() } catch (_) {}
+  return true
 }
 
 function getCurrentMajorRealmLabel() {
@@ -3665,7 +3730,12 @@ function leaderboardScheduleSync(reason) {
 async function leaderboardFetch(kind) {
   const k = String(kind || '')
   if (!isLeaderboardConfigured()) {
-    throw new Error('Leaderboards are not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).')
+    throw new Error(
+      'Leaderboards are not configured. Missing Supabase URL/key. '
+      + 'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY at build time, '
+      + 'or set window.__CS_SUPABASE_URL / window.__CS_SUPABASE_ANON_KEY, '
+      + `or localStorage keys ${LEADERBOARD_CFG_STORAGE_URL_KEY} / ${LEADERBOARD_CFG_STORAGE_ANON_KEY}.`
+    )
   }
   const cfg = getLeaderboardConfig()
   const base = `${cfg.url.replace(/\/+$/, '')}/rest/v1/leaderboard`
@@ -5651,7 +5721,8 @@ function renderLeaderboardsPanel() {
     }
   }
 
-  const configured = isLeaderboardConfigured()
+  const cfg = getLeaderboardConfig()
+  const configured = Boolean(cfg?.url && cfg?.anonKey)
   const major = state.leaderboards?.major || { rows: [], loading: false, error: '', fetchedAt: 0 }
   const rebirth = state.leaderboards?.rebirth || { rows: [], loading: false, error: '', fetchedAt: 0 }
 
@@ -5694,7 +5765,14 @@ function renderLeaderboardsPanel() {
 
       ${!configured ? `
         <div class="inventory-empty">Global leaderboards are not configured for this build.</div>
-        <div class="settings-hint">Set <strong>VITE_SUPABASE_URL</strong> and <strong>VITE_SUPABASE_ANON_KEY</strong> to enable.</div>
+        <div class="settings-hint">
+          Set <strong>VITE_SUPABASE_URL</strong> and <strong>VITE_SUPABASE_ANON_KEY</strong> (GitHub Actions secrets),
+          or define <strong>window.__CS_SUPABASE_URL</strong> / <strong>window.__CS_SUPABASE_ANON_KEY</strong>,
+          or set them in <strong>localStorage</strong>.
+        </div>
+        <div class="settings-hint" style="opacity:0.85">
+          Status: URL=${cfg?.url ? 'yes' : 'no'}; Key=${cfg?.anonKey ? 'yes' : 'no'}; Source=${escapeHtml(String(cfg?.source || 'none'))}
+        </div>
       ` : ''}
 
       ${configured ? `
