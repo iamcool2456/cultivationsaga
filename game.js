@@ -1149,7 +1149,6 @@ const state = {
   rebirthNodeModalId: null,
   autoCraftPillFile: '',
   devModalMode: 'RESET', // 'RESET' | 'SPEED'
-  resetPassword: '',
   devSpeed3x: false,
   devIgnoreRequirements: false,
   activeSidePanels: new Set(), // Set of 'stats', 'inventory', 'actions', 'profile', 'sect', 'quests', 'moves', 'shop', 'herbalism'
@@ -3017,9 +3016,10 @@ function loadGame() {
       if (state.phase === 'SECT') state.phase = 'FARMING'
 
       // Default dev flags for older saves
-      if (state.devModalMode !== 'RESET' && state.devModalMode !== 'SPEED') state.devModalMode = 'RESET'
-      if (typeof state.devSpeed3x !== 'boolean') state.devSpeed3x = false
-      if (typeof state.devIgnoreRequirements !== 'boolean') state.devIgnoreRequirements = false
+      state.showResetModal = false
+      state.devModalMode = 'RESET'
+      state.devSpeed3x = false
+      state.devIgnoreRequirements = false
 
       // Remove legacy/unused story flags from older saves
       try {
@@ -5345,19 +5345,11 @@ function render() {
     }
   }
   
-  // Render dev reset button (always visible in corner)
-  renderDevButton()
-  
-  // Render reset confirmation modal if needed
-  if (state.showResetModal) {
-    renderResetModal()
-  } else {
-    // Remove modal if it exists
-    const modal = document.getElementById('reset-modal')
-    if (modal) {
-      modal.remove()
-    }
-  }
+  // Remove dev-only UI affordances (dev reset, speed, cinematic previews, etc)
+  const devUi = document.getElementById('dev-reset-container')
+  if (devUi) devUi.remove()
+  const resetModal = document.getElementById('reset-modal')
+  if (resetModal) resetModal.remove()
 
   // Render rebirth node modal if needed
   if (state.showRebirthNodeModal) {
@@ -5449,57 +5441,6 @@ function attachPanelResizePersistence(el, key) {
 
   ro?.observe?.(el)
   _panelResizeMeta.set(el, { ro })
-}
-
-function renderResetModal() {
-  // Check if modal already exists
-  let modal = document.getElementById('reset-modal')
-  if (!modal) {
-    modal = document.createElement('div')
-    modal.id = 'reset-modal'
-    modal.className = 'modal-overlay'
-    document.body.appendChild(modal)
-  }
-
-  // If the modal content already exists, do not rebuild it.
-  // Rebuilding via innerHTML causes the input to be destroyed/recreated,
-  // which looks like a refresh and makes typing impossible.
-  const existingInput = modal.querySelector('#reset-password-input')
-  if (existingInput) {
-    return
-  }
-
-  const isSpeedMode = state.devModalMode === 'SPEED'
-  const title = isSpeedMode ? 'Developer Speed' : 'Developer Reset'
-  const prompt = isSpeedMode ? 'Enter password to toggle 3× speed mode:' : 'Enter password to reset game:'
-  const confirmLabel = isSpeedMode
-    ? (state.devSpeed3x ? 'Disable 3× Speed' : 'Enable 3× Speed')
-    : 'Confirm Reset'
-
-  modal.innerHTML = `
-    <div class="modal-content">
-      <h2>${title}</h2>
-      <p>${prompt}</p>
-      <input 
-        type="password" 
-        id="reset-password-input" 
-        class="password-input" 
-        placeholder="Enter password"
-        onkeypress="if(event.key === 'Enter') window.confirmReset()"
-      />
-      <p class="password-error" id="password-error" style="display: none;">Incorrect password!</p>
-      <div class="modal-buttons">
-        <button onclick="window.confirmReset()" class="reset-button">${confirmLabel}</button>
-        <button onclick="window.cancelReset()" class="cancel-button">Cancel</button>
-      </div>
-    </div>
-  `
-  
-  // Focus the password input after a short delay
-  setTimeout(() => {
-    const input = document.getElementById('reset-password-input')
-    if (input) input.focus()
-  }, 100)
 }
 
 function getRebirthNodeIconSrc(nodeId) {
@@ -6070,27 +6011,6 @@ function renderRebirthNodeModal() {
         <button onclick="window.closeRebirthNodeModal()" class="cancel-button">Close</button>
       </div>
     </div>
-  `
-}
-
-function renderDevButton() {
-  // Check if dev button already exists
-  let devButton = document.getElementById('dev-reset-container')
-  if (!devButton) {
-    devButton = document.createElement('div')
-    devButton.id = 'dev-reset-container'
-    devButton.className = 'dev-reset-container'
-    document.body.appendChild(devButton)
-  }
-
-  const speedLabel = state.devSpeed3x ? '3× Speed: ON' : '3× Speed: OFF'
-  const reqLabel = state.devIgnoreRequirements ? 'Ignore Requirements: ON' : 'Ignore Requirements: OFF'
-  devButton.innerHTML = `
-    <button onclick="window.showResetConfirmation()" class="dev-reset-button">Dev Reset</button>
-    <button onclick="window.showSpeedConfirmation()" class="dev-reset-button">${speedLabel}</button>
-    <button onclick="window.toggleIgnoreRequirements()" class="dev-reset-button">${reqLabel}</button>
-    <button onclick="window.devPlayCarpetBombCinematic()" class="dev-reset-button">Play: Carpet Bomb</button>
-    <button onclick="window.devPlayHeavensAssaultCinematic()" class="dev-reset-button">Play: Storm the Heavens</button>
   `
 }
 
@@ -11009,38 +10929,6 @@ window.demonCinematicLayDownAndRot = () => {
   )
 }
 
-window.devPlayCarpetBombCinematic = () => {
-  // Preview only: do not advance story flags or spend currency.
-  try {
-    if (state.phase === 'STORY_DIALOG') window.closeStoryDialog()
-  } catch (_) {}
-
-  runCarpetBombCinematicCore({
-    onDone: () => {
-      log('Preview: Carpet Bomb cinematic complete.')
-    }
-  })
-}
-
-window.devPlayHeavensAssaultCinematic = () => {
-  // Preview only: do not advance story flags.
-  try {
-    if (state.phase === 'STORY_DIALOG') window.closeStoryDialog()
-  } catch (_) {}
-
-  runHeavensAssaultCinematicPart1ThreeCore({
-    onDone: () => {
-      // Part 2 removed.
-      try {
-        const el = document.querySelector('.cinematic-overlay')
-        if (el) el.remove()
-      } catch (_) {}
-      log('Preview: Storm the Heavens cinematic complete.')
-      render()
-    }
-  })
-}
-
 // ============================================================================
 // HEAVENLY DEMON DETOUR CHAIN
 // ============================================================================
@@ -11650,65 +11538,6 @@ window.rerollFate = () => {
   saveGame()
   
   log(`Rerolled fate! ${state.rerollsRemaining} rerolls remaining.`)
-}
-
-window.showResetConfirmation = () => {
-  state.devModalMode = 'RESET'
-  state.showResetModal = true
-  render()
-}
-
-window.showSpeedConfirmation = () => {
-  state.devModalMode = 'SPEED'
-  state.showResetModal = true
-  render()
-}
-
-window.toggleIgnoreRequirements = () => {
-  state.devIgnoreRequirements = !state.devIgnoreRequirements
-  log(state.devIgnoreRequirements ? 'Ignore requirements enabled.' : 'Ignore requirements disabled.')
-  render()
-  saveGame()
-}
-
-window.confirmReset = () => {
-  const input = document.getElementById('reset-password-input')
-  const error = document.getElementById('password-error')
-  const password = input ? input.value : ''
-  
-  if (password === 'Molly0318!') {
-    // Correct password
-    if (state.devModalMode === 'SPEED') {
-      state.devSpeed3x = !state.devSpeed3x
-      state.showResetModal = false
-      log(state.devSpeed3x ? '3× speed enabled.' : '3× speed disabled.')
-      render()
-      saveGame()
-    } else {
-      // Reset the game
-      resetGame()
-    }
-  } else {
-    // Wrong password - show error
-    if (error) {
-      error.style.display = 'block'
-    }
-    if (input) {
-      input.value = ''
-      input.focus()
-      // Shake animation
-      input.style.animation = 'shake 0.5s'
-      setTimeout(() => {
-        input.style.animation = ''
-      }, 500)
-    }
-  }
-}
-
-window.cancelReset = () => {
-  state.showResetModal = false
-  state.devModalMode = 'RESET'
-  render()
 }
 
 window.startGame = () => {
