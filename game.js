@@ -3403,7 +3403,16 @@ function playSfx(kind) {
 function stopAmbientMusic() {
   if (!__audioMusicNodes) return
   try {
-    for (const n of __audioMusicNodes) {
+    // Support both legacy array-form and the newer object-form with timers.
+    const nodes = Array.isArray(__audioMusicNodes) ? __audioMusicNodes : (__audioMusicNodes?.nodes || [])
+    const timers = Array.isArray(__audioMusicNodes) ? [] : (__audioMusicNodes?.timers || [])
+
+    for (const id of timers) {
+      try { clearInterval(id) } catch (_) {}
+      try { clearTimeout(id) } catch (_) {}
+    }
+
+    for (const n of nodes) {
       try { n.stop && n.stop() } catch (_) {}
       try { n.disconnect && n.disconnect() } catch (_) {}
     }
@@ -3433,52 +3442,170 @@ function ensureAmbientMusic() {
   if (__audioMusicNodes && __audioMusicMode !== mode) stopAmbientMusic()
   __audioMusicMode = mode
 
-  // Lightweight procedural “soundtrack” modes.
+  // Upgraded lightweight procedural music: chord pad + bass pulse + arpeggio.
+  // (Still tiny + no assets; avoids the “single monotone synth” feel.)
   const t0 = ctx.currentTime
-  const base = (mode === 'combat') ? 82 : (mode === 'fate') ? 132 : 110
 
-  const gain = ctx.createGain(); gain.gain.setValueAtTime(0.12, t0)
-  gain.connect(__audioMusic)
+  const tempo = (mode === 'combat') ? 112 : (mode === 'fate') ? 92 : 78
+  const beatSec = 60 / Math.max(30, tempo)
 
-  // Common LFO for gentle movement.
-  const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime(mode === 'combat' ? 0.35 : 0.08, t0)
-  const lfoGain = ctx.createGain(); lfoGain.gain.setValueAtTime(mode === 'combat' ? 0.10 : 0.18, t0)
-  lfo.connect(lfoGain)
-  lfoGain.connect(gain.gain)
+  // Root note per mode (Hz): E2 / C3 / A2-ish.
+  const rootHz = (mode === 'combat') ? 82.41 : (mode === 'fate') ? 130.81 : 110.00
 
-  // Pad layer.
-  const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.setValueAtTime(base * 2, t0)
-  const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.setValueAtTime(base * 3, t0)
-  o2.detune.setValueAtTime(mode === 'fate' ? 18 : 8, t0)
-  o1.connect(gain)
-  o2.connect(gain)
+  const semitone = (n) => rootHz * Math.pow(2, (Number(n) || 0) / 12)
+  const clampT = (x) => Math.max(0.001, Math.min(10, Number(x) || 0.001))
 
-  let extraNodes = []
-  if (mode === 'combat') {
-    // Add a subtle bass pulse.
-    const bass = ctx.createOscillator(); bass.type = 'square'; bass.frequency.setValueAtTime(base, t0)
-    const bassGain = ctx.createGain(); bassGain.gain.setValueAtTime(0.06, t0)
-    bass.connect(bassGain)
-    bassGain.connect(gain)
-    extraNodes.push(bass, bassGain)
-  } else if (mode === 'fate') {
-    // Add a faint shimmer.
-    const sh = ctx.createOscillator(); sh.type = 'triangle'; sh.frequency.setValueAtTime(base * 5, t0)
-    const shGain = ctx.createGain(); shGain.gain.setValueAtTime(0.045, t0)
-    sh.detune.setValueAtTime(22, t0)
-    sh.connect(shGain)
-    shGain.connect(gain)
-    extraNodes.push(sh, shGain)
+  const master = ctx.createGain()
+  master.gain.setValueAtTime(0.22, t0)
+  master.connect(__audioMusic)
+
+  // Gentle movement: LFO to filter cutoff.
+  const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime((mode === 'combat') ? 0.25 : 0.12, t0)
+  const lfoGain = ctx.createGain(); lfoGain.gain.setValueAtTime((mode === 'combat') ? 380 : 520, t0)
+
+  // Pad chain.
+  const padGain = ctx.createGain(); padGain.gain.setValueAtTime(0.0001, t0)
+  const padFilter = ctx.createBiquadFilter(); padFilter.type = 'lowpass'
+  padFilter.frequency.setValueAtTime((mode === 'combat') ? 900 : (mode === 'fate') ? 1200 : 1400, t0)
+  padFilter.Q.setValueAtTime(0.8, t0)
+  lfo.connect(lfoGain); lfoGain.connect(padFilter.frequency)
+  padGain.connect(padFilter); padFilter.connect(master)
+
+  // Slow fade-in (prevents click on start).
+  padGain.gain.setTargetAtTime((mode === 'combat') ? 0.16 : 0.18, t0 + 0.02, 0.25)
+
+  const pad1 = ctx.createOscillator(); pad1.type = 'sawtooth'
+  const pad2 = ctx.createOscillator(); pad2.type = 'triangle'
+  const pad3 = ctx.createOscillator(); pad3.type = 'sine'
+  pad2.detune.setValueAtTime(8, t0)
+  pad1.detune.setValueAtTime(-6, t0)
+  pad1.connect(padGain); pad2.connect(padGain); pad3.connect(padGain)
+
+  // Bass pulse (separate chain so it stays tight).
+  const bassGain = ctx.createGain(); bassGain.gain.setValueAtTime(0.0001, t0)
+  const bassFilter = ctx.createBiquadFilter(); bassFilter.type = 'lowpass'
+  bassFilter.frequency.setValueAtTime(260, t0)
+  bassGain.connect(bassFilter); bassFilter.connect(master)
+  const bassOsc = ctx.createOscillator(); bassOsc.type = 'sine'; bassOsc.connect(bassGain)
+
+  // Arpeggio pluck.
+  const arpGain = ctx.createGain(); arpGain.gain.setValueAtTime(0.0001, t0)
+  const arpFilter = ctx.createBiquadFilter(); arpFilter.type = 'bandpass'
+  arpFilter.frequency.setValueAtTime((mode === 'combat') ? 1200 : 950, t0)
+  arpFilter.Q.setValueAtTime(7.0, t0)
+  arpGain.connect(arpFilter); arpFilter.connect(master)
+  const arpOsc = ctx.createOscillator(); arpOsc.type = (mode === 'combat') ? 'square' : 'triangle'; arpOsc.connect(arpGain)
+
+  // Minor-ish progression via semitone stacks (keeps it simple + musical).
+  // Each chord: [root, minor third, fifth] with optional color tone.
+  const progression = (mode === 'combat')
+    ? [
+        [0, 3, 7, 10],
+        [-2, 2, 5, 10],
+        [-5, -2, 2, 7],
+        [-7, -4, 0, 5]
+      ]
+    : (mode === 'fate')
+      ? [
+          [0, 3, 7, 14],
+          [-3, 0, 4, 11],
+          [-5, -2, 2, 9],
+          [-7, -4, 0, 7]
+        ]
+      : [
+          [0, 3, 7, 12],
+          [-3, 0, 4, 12],
+          [-5, -2, 2, 9],
+          [-7, -4, 0, 7]
+        ]
+
+  let chordIdx = 0
+  let arpStep = 0
+
+  const setChord = (idx) => {
+    const chord = progression[idx % progression.length]
+    const f1 = semitone(chord[0])
+    const f2 = semitone(chord[1])
+    const f3 = semitone(chord[2])
+    const t = ctx.currentTime
+    try {
+      pad1.frequency.setTargetAtTime(f1, t, clampT(0.08))
+      pad2.frequency.setTargetAtTime(f2, t, clampT(0.08))
+      pad3.frequency.setTargetAtTime(f3, t, clampT(0.08))
+      bassOsc.frequency.setTargetAtTime(f1 / 2, t, clampT(0.02))
+    } catch (_) {
+      pad1.frequency.setValueAtTime(f1, t)
+      pad2.frequency.setValueAtTime(f2, t)
+      pad3.frequency.setValueAtTime(f3, t)
+      bassOsc.frequency.setValueAtTime(f1 / 2, t)
+    }
   }
 
-  o1.start(t0)
-  o2.start(t0)
+  const pluck = (freq, peak, durSec) => {
+    const t = ctx.currentTime
+    const dur = Math.max(0.03, Number(durSec) || 0.08)
+    const p = Math.max(0.0002, Number(peak) || 0.06)
+    try {
+      arpOsc.frequency.setValueAtTime(Math.max(30, freq), t)
+      arpGain.gain.cancelScheduledValues(t)
+      arpGain.gain.setValueAtTime(0.0001, t)
+      arpGain.gain.exponentialRampToValueAtTime(p, t + 0.01)
+      arpGain.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    } catch (_) {}
+  }
+
+  const bassPulse = (peak, durSec) => {
+    const t = ctx.currentTime
+    const dur = Math.max(0.05, Number(durSec) || 0.12)
+    const p = Math.max(0.0002, Number(peak) || 0.08)
+    try {
+      bassGain.gain.cancelScheduledValues(t)
+      bassGain.gain.setValueAtTime(0.0001, t)
+      bassGain.gain.exponentialRampToValueAtTime(p, t + 0.01)
+      bassGain.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    } catch (_) {}
+  }
+
+  // Start oscillators.
+  setChord(0)
+  pad1.start(t0); pad2.start(t0); pad3.start(t0)
+  bassOsc.start(t0)
+  arpOsc.start(t0)
   lfo.start(t0)
-  for (const n of extraNodes) {
-    if (n && typeof n.start === 'function') n.start(t0)
-  }
 
-  __audioMusicNodes = [o1, o2, lfo, lfoGain, gain, ...extraNodes]
+  // Timers drive chord changes + bass + arp.
+  const timers = []
+
+  // Chord changes every 4 beats (one bar). Combat changes faster.
+  const chordEveryBeats = (mode === 'combat') ? 2 : 4
+  timers.push(setInterval(() => {
+    if (!__audioCtx || __audioMusicMode !== mode) return
+    chordIdx = (chordIdx + 1) % progression.length
+    setChord(chordIdx)
+  }, Math.max(120, Math.floor(beatSec * 1000 * chordEveryBeats))))
+
+  // Bass pulse on quarter notes.
+  timers.push(setInterval(() => {
+    if (!__audioCtx || __audioMusicMode !== mode) return
+    bassPulse((mode === 'combat') ? 0.10 : 0.075, (mode === 'combat') ? 0.10 : 0.14)
+  }, Math.max(80, Math.floor(beatSec * 1000))))
+
+  // Arpeggio on 8th notes (walk within current chord + occasional octave).
+  timers.push(setInterval(() => {
+    if (!__audioCtx || __audioMusicMode !== mode) return
+    const chord = progression[chordIdx % progression.length]
+    const pick = [chord[0], chord[1], chord[2], chord[3] ?? chord[2] + 12]
+    const step = pick[arpStep % pick.length]
+    const freq = semitone(step + ((arpStep % 8 === 7) ? 12 : 0))
+    const peak = (mode === 'combat') ? 0.055 : 0.045
+    pluck(freq * 2, peak, (mode === 'combat') ? 0.06 : 0.085)
+    arpStep++
+  }, Math.max(60, Math.floor(beatSec * 1000 * 0.5))))
+
+  __audioMusicNodes = {
+    nodes: [master, padGain, padFilter, pad1, pad2, pad3, bassGain, bassFilter, bassOsc, arpGain, arpFilter, arpOsc, lfo, lfoGain],
+    timers
+  }
 }
 
 window.setAudioEnabled = (enabled) => {
@@ -6790,7 +6917,6 @@ function renderSettingsPanel() {
           <input type="checkbox" ${state.hardMode ? 'checked' : ''} onchange="window.setHardMode(this.checked)" />
           <span class="settings-row-text">Hard Mode (death ends your run)</span>
         </label>
-        <div class="settings-hint">You can toggle Hard Mode at any time.</div>
       </div>
 
       <div class="settings-block">
