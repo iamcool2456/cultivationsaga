@@ -143,6 +143,73 @@ body {
   }
 }
 
+/* Very small phones: shrink tap targets/padding so everything stays usable. */
+@media (max-width: 520px) {
+  button {
+    padding: 12px 14px;
+    font-size: 1em;
+  }
+
+  .action-panel {
+    padding: 16px;
+  }
+
+  .action-panel h2 {
+    font-size: 1.25em;
+  }
+
+  .story-text {
+    font-size: 1em;
+  }
+
+  .game-screen {
+    padding: 16px;
+  }
+
+  .fate-screen {
+    padding: 18px;
+  }
+}
+
+/* Ultra-narrow devices: remove min-width constraints that can force overflow. */
+@media (max-width: 380px) {
+  #leaderboards-panel {
+    min-width: 0;
+    resize: none;
+  }
+
+  .lb-table-header,
+  .lb-row {
+    grid-template-columns: 52px 1fr 78px;
+  }
+
+  .side-panels-overlay .draggable-panel {
+    min-width: 0 !important;
+    width: calc(100vw - 20px) !important;
+  }
+}
+
+/* Short screens (e.g. 1024x600): reduce tall blocks so gameplay stays visible. */
+@media (max-height: 650px) {
+  .combat-view {
+    padding: 18px;
+    margin-bottom: 18px;
+  }
+
+  .story-event {
+    margin-top: 16px;
+    padding: 14px;
+  }
+
+  .panel-content {
+    padding: 18px;
+  }
+
+  .log {
+    max-height: 190px;
+  }
+}
+
 /* Paper-style game background (everything except intro/loading) */
 body:not(.phase-intro-loading) {
   background: var(--paper-2);
@@ -1432,7 +1499,7 @@ body::after {
   align-items: flex-start;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .game-content-layout {
     flex-direction: column;
   }
