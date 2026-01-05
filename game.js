@@ -3547,7 +3547,7 @@ window.forceLeaderboardSyncNow = async () => {
       const cfg = getLeaderboardConfig()
       const u = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : ''
       const base = `${cfg.url.replace(/\/+$|\/+$/g, '')}/rest/v1/leaderboard`
-      const url = `${base}?select=username,best_major_label,best_major_index,best_major_is_demon&username=eq.${encodeURIComponent(u)}`
+      const url = `${base}?select=username,best_major_label,best_major_index,best_major_sub_index,best_major_is_demon&username=eq.${encodeURIComponent(u)}`
       const res = await fetch(url, {
         method: 'GET',
         headers: { 'apikey': cfg.anonKey, 'Authorization': `Bearer ${cfg.anonKey}` }
@@ -4076,7 +4076,7 @@ window.introContinue = function() {
 // GLOBAL LEADERBOARDS (Supabase REST)
 // ============================================================================
 let __leaderboardSyncTimer = null
-let __leaderboardLastSent = { username: '', rp: -1, bestRp: -1, bestMajor: -1, bestMajorIsDemon: null, bestMajorLabel: '' }
+let __leaderboardLastSent = { username: '', rp: -1, bestRp: -1, bestMajor: -1, bestMajorSub: -1, bestMajorIsDemon: null, bestMajorLabel: '' }
 
 function getLeaderboardPlayerPayload() {
   const username = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : ''
@@ -4086,6 +4086,7 @@ function getLeaderboardPlayerPayload() {
     ? state.bestMajorRealm
     : { index: 0, subIndex: 0, isDemon: false, label: '' }
   const bestMajorIndex = clampNonNegativeInt(bm.index)
+  const bestMajorSubIndex = clampNonNegativeInt(bm.subIndex)
   const bestMajorIsDemon = Boolean(bm.isDemon)
   const bestMajorLabel = String(bm.label || '')
   return {
@@ -4093,6 +4094,7 @@ function getLeaderboardPlayerPayload() {
     rebirth_points: rp,
     best_rebirth_points: bestRp,
     best_major_index: bestMajorIndex,
+    best_major_sub_index: bestMajorSubIndex,
     best_major_is_demon: bestMajorIsDemon,
     best_major_label: bestMajorLabel
   }
@@ -4109,6 +4111,7 @@ async function leaderboardUpsertNow() {
     && last.rp === payload.rebirth_points
     && last.bestRp === payload.best_rebirth_points
     && last.bestMajor === payload.best_major_index
+    && last.bestMajorSub === payload.best_major_sub_index
     && last.bestMajorIsDemon === payload.best_major_is_demon
     && last.bestMajorLabel === payload.best_major_label
   if (same) return true
@@ -4116,20 +4119,37 @@ async function leaderboardUpsertNow() {
   const cfg = getLeaderboardConfig()
   const url = `${cfg.url.replace(/\/+$/, '')}/rest/v1/leaderboard?on_conflict=username`
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': cfg.anonKey,
-      'Authorization': `Bearer ${cfg.anonKey}`,
-      'Prefer': 'resolution=merge-duplicates,return=minimal'
-    },
-    body: JSON.stringify(payload)
-  })
+  const doPost = async (bodyObj) => {
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': cfg.anonKey,
+        'Authorization': `Bearer ${cfg.anonKey}`,
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify(bodyObj)
+    })
+  }
 
+  // Prefer the new schema field `best_major_sub_index`, but fall back if the column
+  // hasn't been added yet (keeps old deployments functional).
+  let res = await doPost(payload)
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
-    throw new Error(`Leaderboard upsert failed (${res.status}): ${txt || res.statusText}`)
+    const lower = String(txt || '').toLowerCase()
+    const missingSubIdx = res.status === 400 && (lower.includes('best_major_sub_index') || lower.includes('best_major_sub'))
+    if (missingSubIdx) {
+      const legacy = { ...payload }
+      try { delete legacy.best_major_sub_index } catch (_) {}
+      res = await doPost(legacy)
+      if (!res.ok) {
+        const txt2 = await res.text().catch(() => '')
+        throw new Error(`Leaderboard upsert failed (${res.status}): ${txt2 || res.statusText}`)
+      }
+    } else {
+      throw new Error(`Leaderboard upsert failed (${res.status}): ${txt || res.statusText}`)
+    }
   }
 
   __leaderboardLastSent = {
@@ -4137,6 +4157,7 @@ async function leaderboardUpsertNow() {
     rp: payload.rebirth_points,
     bestRp: payload.best_rebirth_points,
     bestMajor: payload.best_major_index,
+    bestMajorSub: payload.best_major_sub_index,
     bestMajorIsDemon: payload.best_major_is_demon,
     bestMajorLabel: payload.best_major_label
   }
@@ -4179,25 +4200,38 @@ async function leaderboardFetch(kind) {
   }
   const cfg = getLeaderboardConfig()
   const base = `${cfg.url.replace(/\/+$/, '')}/rest/v1/leaderboard`
-  const select = 'select=username,rebirth_points,best_rebirth_points,best_major_index,best_major_is_demon,best_major_label'
+  const selectNew = 'select=username,rebirth_points,best_rebirth_points,best_major_index,best_major_sub_index,best_major_is_demon,best_major_label'
+  const selectLegacy = 'select=username,rebirth_points,best_rebirth_points,best_major_index,best_major_is_demon,best_major_label'
 
   let order = 'order=best_major_index.desc'
   if (k === 'rebirth') order = 'order=best_rebirth_points.desc'
 
-  const url = `${base}?${select}&${order}&limit=25`
+  const headers = {
+    'apikey': cfg.anonKey,
+    'Authorization': `Bearer ${cfg.anonKey}`
+  }
 
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'apikey': cfg.anonKey,
-      'Authorization': `Bearer ${cfg.anonKey}`
-    }
-  })
+  // Try new schema first (sub index). If column doesn't exist yet, fall back.
+  let url = `${base}?${selectNew}&${order}&limit=25`
+  let res = await fetch(url, { method: 'GET', headers })
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
-    throw new Error(`Leaderboard fetch failed (${res.status}): ${txt || res.statusText}`)
+    const lower = String(txt || '').toLowerCase()
+    const missingSubIdx = res.status === 400 && (lower.includes('best_major_sub_index') || lower.includes('best_major_sub'))
+    if (missingSubIdx) {
+      url = `${base}?${selectLegacy}&${order}&limit=25`
+      res = await fetch(url, { method: 'GET', headers })
+    } else {
+      throw new Error(`Leaderboard fetch failed (${res.status}): ${txt || res.statusText}`)
+    }
   }
-  const data = await res.json()
+
+  if (!res.ok) {
+    const txt2 = await res.text().catch(() => '')
+    throw new Error(`Leaderboard fetch failed (${res.status}): ${txt2 || res.statusText}`)
+  }
+
+  const data = await res.json().catch(() => [])
   return Array.isArray(data) ? data : []
 }
 
@@ -6189,9 +6223,14 @@ function renderLeaderboardsPanel() {
     const isSelf = selfNameNorm && u.trim().toLowerCase() === selfNameNorm
 
     const bestRp = clampNonNegativeInt(row?.best_rebirth_points)
-    const realmLabel = String(row?.best_major_label || '')
     const realmIdx = clampNonNegativeInt(row?.best_major_index)
-    const realm = realmLabel || (realmIdx >= 0 ? `Major Realm ${realmIdx + 1}` : '')
+    const realmIsDemon = Boolean(row?.best_major_is_demon)
+    const subRaw = row?.best_major_sub_index
+    const hasSub = Number.isFinite(Number(subRaw))
+    const subIdx = hasSub ? clampNonNegativeInt(subRaw) : 0
+    const computed = hasSub ? getMajorRealmLabelByIndex(realmIdx, subIdx, realmIsDemon) : ''
+    const realmLabel = String(row?.best_major_label || '')
+    const realm = computed || realmLabel || (realmIdx >= 0 ? `Major Realm ${realmIdx + 1}` : '')
     const value = (mode === 'rebirth') ? formatNumber(bestRp) : realm
 
     return `
