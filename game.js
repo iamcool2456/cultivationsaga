@@ -2381,11 +2381,10 @@ window.setLeaderboardConfig = (url, anonKey) => {
 function getCurrentMajorRealmLabel() {
   try {
     const realm = getCurrentCultivationRealm()
-    const stage = `${realm.major}${realm.sub ? ` ${realm.sub}` : ''}`
-    if (state.isDemonPath) {
-      return `Demonic Major Realm ${clampNonNegativeInt(state.cultivationMajorIndex) + 1} — ${stage}`
-    }
-    return stage
+    const major = String(realm.major || '')
+    const sub = String(realm.sub || '')
+    if (!major) return ''
+    return sub ? `${major}-${sub}` : major
   } catch (_) {
     return ''
   }
@@ -3251,6 +3250,8 @@ let __audioMusic = null
 let __audioMusicNodes = null
 let __audioMusicMode = ''
 let __audioInitBound = false
+let __audioButtonClickBound = false
+const __audioLastSfxAtMs = new Map()
 
 const __emojiRegex = (() => {
   try { return new RegExp('\\p{Extended_Pictographic}', 'u') } catch (_) { return null }
@@ -3318,6 +3319,22 @@ function ensureAudioState() {
       }, { once: false, passive: true })
     } catch (_) {}
   }
+
+  if (!__audioButtonClickBound) {
+    __audioButtonClickBound = true
+    try {
+      document.addEventListener('click', (e) => {
+        try {
+          const t = e && e.target
+          if (!t || !t.closest) return
+          const btn = t.closest('button')
+          if (!btn) return
+          if (btn.disabled) return
+          playSfx('click')
+        } catch (_) {}
+      }, true)
+    } catch (_) {}
+  }
 }
 
 function ensureAudioContext() {
@@ -3357,6 +3374,16 @@ function syncAudioGains() {
 function playSfx(kind) {
   ensureAudioState()
   if (!state.audio?.enabled) return
+
+  // Avoid accidental double fires (global click + explicit playSfx calls).
+  try {
+    const k0 = String(kind || '')
+    const now = Date.now()
+    const prev = __audioLastSfxAtMs.get(k0) || 0
+    if (now - prev < 35) return
+    __audioLastSfxAtMs.set(k0, now)
+  } catch (_) {}
+
   const ctx = ensureAudioContext()
   if (!ctx || !__audioSfx) return
   try { if (ctx.state === 'suspended') ctx.resume() } catch (_) {}
