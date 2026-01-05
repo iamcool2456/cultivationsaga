@@ -3517,11 +3517,13 @@ window.forceLeaderboardSyncNow = async () => {
   }
 
   if (!state.leaderboardsSync || typeof state.leaderboardsSync !== 'object') {
-    state.leaderboardsSync = { lastAt: 0, lastOk: false, lastMsg: '' }
+    state.leaderboardsSync = { lastAt: 0, lastOk: false, lastMsg: '', sentLabel: '', storedLabel: '' }
   }
   state.leaderboardsSync.lastAt = Date.now()
   state.leaderboardsSync.lastOk = false
   state.leaderboardsSync.lastMsg = 'Syncing...'
+  state.leaderboardsSync.sentLabel = ''
+  state.leaderboardsSync.storedLabel = ''
   try { saveGame() } catch (_) {}
   try { render() } catch (_) {}
 
@@ -3532,6 +3534,13 @@ window.forceLeaderboardSyncNow = async () => {
   try {
     // Ensure label is in the latest format before syncing.
     try { syncBestMajorRealm() } catch (_) {}
+
+    // Capture what we're about to send.
+    try {
+      const payload = getLeaderboardPlayerPayload()
+      state.leaderboardsSync.sentLabel = String(payload?.best_major_label || '')
+    } catch (_) {}
+
     await leaderboardUpsertNow()
     // Verify what Supabase stored for this username.
     try {
@@ -3548,8 +3557,9 @@ window.forceLeaderboardSyncNow = async () => {
         const row = Array.isArray(data) ? data[0] : null
         const stored = String(row?.best_major_label || '')
         state.leaderboardsSync.lastOk = true
+        state.leaderboardsSync.storedLabel = stored
         state.leaderboardsSync.lastMsg = stored
-        log(`Leaderboard synced. Stored label: ${stored || '(empty)'}`)
+        log(`Leaderboard synced. Sent: ${String(state.leaderboardsSync.sentLabel || '') || '(empty)'} | Stored: ${stored || '(empty)'}`)
       } else {
         const txt = await res.text().catch(() => '')
         state.leaderboardsSync.lastOk = true
@@ -7162,6 +7172,8 @@ function renderSettingsPanel() {
   const syncAt = clampNonNegativeInt(state.leaderboardsSync?.lastAt)
   const syncOk = Boolean(state.leaderboardsSync?.lastOk)
   const syncMsg = String(state.leaderboardsSync?.lastMsg || '')
+  const syncSent = String(state.leaderboardsSync?.sentLabel || '')
+  const syncStored = String(state.leaderboardsSync?.storedLabel || '')
   const syncStamp = syncAt ? new Date(syncAt).toLocaleString() : ''
 
   panel.innerHTML = `
@@ -7190,6 +7202,7 @@ function renderSettingsPanel() {
         <button class="settings-btn" onclick="window.forceLeaderboardSyncNow()">Sync Leaderboard Now</button>
         <div class="settings-hint">Sends your best cultivation + rebirth stats to the global leaderboard.</div>
         ${syncAt ? `<div class="settings-hint" style="opacity:0.9">Last sync: <strong>${escapeHtml(syncStamp)}</strong> — ${syncOk ? 'OK' : 'FAILED'}${syncMsg ? ` — ${escapeHtml(syncMsg)}` : ''}</div>` : ''}
+        ${syncAt ? `<div class="settings-hint" style="opacity:0.85">Sent label: <strong>${escapeHtml(syncSent || '(empty)')}</strong><br>Stored label: <strong>${escapeHtml(syncStored || '(empty)')}</strong></div>` : ''}
       </div>
 
       <div class="profile-audio">
