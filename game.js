@@ -5567,46 +5567,46 @@ function renderSidePanelToggles() {
   
   togglesContainer.innerHTML = `
     <button class="panel-toggle-btn ${state.activeSidePanels.has('stats') ? 'active' : ''}" onclick="window.toggleSidePanel('stats')" title="Stats">
-      ${renderUiIcon('stats', { title: 'Stats' })}
+      📊
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('inventory') ? 'active' : ''}" onclick="window.toggleSidePanel('inventory')" title="Inventory">
-      ${renderUiIcon('inventory', { title: 'Inventory' })}
+      🎒
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('actions') ? 'active' : ''}" onclick="window.toggleSidePanel('actions')" title="Actions">
-      ${renderUiIcon('actions', { title: 'Actions' })}
+      ⚔️
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('herbalism') ? 'active' : ''}" onclick="window.toggleSidePanel('herbalism')" title="Herbalism">
-      ${renderUiIcon('spark', { title: 'Herbalism' })}
+      🌿
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('settings') ? 'active' : ''}" onclick="window.toggleSidePanel('settings')" title="Settings">
-      ${renderUiIcon('settings', { title: 'Settings' })}
+      ⚙️
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('quests') ? 'active' : ''}" onclick="window.toggleSidePanel('quests')" title="Quests">
-      ${renderUiIcon('quests', { title: 'Quests' })}
+      📜
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('profile') ? 'active' : ''}" onclick="window.toggleSidePanel('profile')" title="Character Profile">
-      ${renderUiIcon('profile', { title: 'Character Profile' })}
+      👤
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('sect') ? 'active' : ''}" onclick="window.toggleSidePanel('sect')" title="Sect">
-      ${renderUiIcon('sect', { title: 'Sect' })}
+      🏯
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('recipes') ? 'active' : ''}" onclick="window.toggleSidePanel('recipes')" title="Recipe Book">
-      ${renderUiIcon('quests', { title: 'Recipe Book' })}
+      📖
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('moves') ? 'active' : ''}" onclick="window.toggleSidePanel('moves')" title="Moves">
-      ${renderUiIcon('moves', { title: 'Moves' })}
+      🥋
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('shop') ? 'active' : ''}" onclick="window.toggleSidePanel('shop')" title="Shop">
-      ${renderUiIcon('shop', { title: 'Shop' })}
+      🛒
     </button>
 
     <button class="panel-toggle-btn ${state.activeSidePanels.has('leaderboards') ? 'active' : ''}" onclick="window.toggleSidePanel('leaderboards')" title="Leaderboards">
-      ${renderUiIcon('stats', { title: 'Leaderboards' })}
+      🏆
     </button>
 
     ${state.cloudConqueredSectsUnlocked ? `
       <button class="panel-toggle-btn ${state.activeSidePanels.has('conqueredSects') ? 'active' : ''}" onclick="window.toggleSidePanel('conqueredSects')" title="Conquered Sects">
-        ${renderUiIcon('flag', { title: 'Conquered Sects' })}
+        🚩
       </button>
     ` : ''}
   `
@@ -5972,7 +5972,6 @@ function renderConqueredSectsPanel() {
 
 function renderCharacterProfilePanel() {
   ensureCharacterProfileGenerated()
-  try { ensureAudioState() } catch (_) {}
 
   let panel = document.getElementById('profile-panel')
   const isNewPanel = !panel
@@ -5995,9 +5994,6 @@ function renderCharacterProfilePanel() {
 
   const name = (state.playerName && state.playerName.trim()) ? state.playerName.trim() : 'Wanderer'
   const attrs = Array.isArray(state.characterProfile?.attributes) ? state.characterProfile.attributes : []
-  const audioEnabled = Boolean(state.audio?.enabled)
-  const sfxVol = clampNonNegativeNumber(state.audio?.sfxVolume)
-  const musicVol = clampNonNegativeNumber(state.audio?.musicVolume)
 
   panel.innerHTML = `
     <div class="panel-header" onmousedown="window.startDrag(event, 'profile-panel')">
@@ -6008,23 +6004,6 @@ function renderCharacterProfilePanel() {
       <div class="profile-name">${escapeHtml(name)}</div>
       <div class="profile-traits">
         ${attrs.map(a => `<div class="profile-trait">• ${escapeHtml(a)}</div>`).join('')}
-      </div>
-
-      <div class="profile-audio">
-        <div class="profile-audio-title">${renderUiIcon('spark')} Audio</div>
-        <label class="profile-audio-row">
-          <input type="checkbox" ${audioEnabled ? 'checked' : ''} onchange="window.setAudioEnabled(this.checked)">
-          <span>Enable sound</span>
-        </label>
-        <label class="profile-audio-row">
-          <span class="profile-audio-label">SFX</span>
-          <input class="profile-audio-range" type="range" min="0" max="1" step="0.01" value="${escapeHtml(String(sfxVol))}" oninput="window.setAudioSfxVolume(this.value)">
-          <button class="profile-audio-test" type="button" onclick="window.audioTestSfx()">TEST</button>
-        </label>
-        <label class="profile-audio-row">
-          <span class="profile-audio-label">Music</span>
-          <input class="profile-audio-range" type="range" min="0" max="1" step="0.01" value="${escapeHtml(String(musicVol))}" oninput="window.setAudioMusicVolume(this.value)">
-        </label>
       </div>
     </div>
   `
@@ -6770,6 +6749,8 @@ window.endRunViaUnlockedReset = () => {
 }
 
 function renderSettingsPanel() {
+  try { ensureAudioState() } catch (_) {}
+
   let panel = document.getElementById('settings-panel')
   const isNewPanel = !panel
 
@@ -6793,6 +6774,10 @@ function renderSettingsPanel() {
   const resetPct = clampNonNegativeInt(u.resetUnlockProgress)
   const resetReady = resetPct >= 100
 
+  const audioEnabled = Boolean(state.audio?.enabled)
+  const sfxVol = clampNonNegativeNumber(state.audio?.sfxVolume)
+  const musicVol = clampNonNegativeNumber(state.audio?.musicVolume)
+
   panel.innerHTML = `
     <div class="panel-header" onmousedown="window.startDrag(event, 'settings-panel')">
       <h3>${renderUiIcon('settings', { title: 'Settings' })} Settings</h3>
@@ -6815,6 +6800,23 @@ function renderSettingsPanel() {
           End Run (Reset)
         </button>
         <div class="settings-hint">This button unlocks from the Rebirth Tree at 100%.</div>
+      </div>
+
+      <div class="profile-audio">
+        <div class="profile-audio-title">Audio</div>
+        <label class="profile-audio-row">
+          <input type="checkbox" ${audioEnabled ? 'checked' : ''} onchange="window.setAudioEnabled(this.checked)">
+          <span>Enable sound</span>
+        </label>
+        <label class="profile-audio-row">
+          <span class="profile-audio-label">SFX</span>
+          <input class="profile-audio-range" type="range" min="0" max="1" step="0.01" value="${escapeHtml(String(sfxVol))}" oninput="window.setAudioSfxVolume(this.value)">
+          <button class="profile-audio-test" type="button" onclick="window.audioTestSfx()">TEST</button>
+        </label>
+        <label class="profile-audio-row">
+          <span class="profile-audio-label">Music</span>
+          <input class="profile-audio-range" type="range" min="0" max="1" step="0.01" value="${escapeHtml(String(musicVol))}" oninput="window.setAudioMusicVolume(this.value)">
+        </label>
       </div>
     </div>
   `
@@ -8310,7 +8312,7 @@ function renderActionsPanel() {
             const isOnCooldown = cd > 0
             return `
               <button class="action-button" data-action-key="${escapeHtml(String(key))}" data-running="${isRunning ? 1 : 0}" ${isRunning ? 'aria-busy="true"' : ''} style="--progressPct:${progressPct};" onclick="window.executeAction('repeatable', ${index})" ${((action.disabled || isOnCooldown) && !state.devIgnoreRequirements) ? 'disabled' : ''}${hoverAttrs}>
-                <span class="action-button-label">${renderUiIcon('spark')} ${escapeHtml(getActionDisplayName(action.name))}${cooldownText}</span>
+                <span class="action-button-label">${escapeHtml(getActionDisplayName(action.name))}${cooldownText}</span>
               </button>
             `
           }).join('')}
@@ -8337,7 +8339,7 @@ function renderActionsPanel() {
               const cdText = cd > 0 ? `<br><small>Cooldown: ${cd}s</small>` : ''
               return `
                 <button class="action-button special" data-action-key="${escapeHtml(String(key))}" data-running="${isRunning ? 1 : 0}" ${isRunning ? 'aria-busy="true"' : ''} style="--progressPct:${progressPct};" onclick="window.executeAction('special', ${index})" ${((action.disabled || isOnCooldown) && !state.devIgnoreRequirements) ? 'disabled' : ''}${hoverAttrs}>
-                  <span class="action-button-label">${renderUiIcon('spark')} ${escapeHtml(getActionDisplayName(action.name))}${cdText}</span>
+                  <span class="action-button-label">${escapeHtml(getActionDisplayName(action.name))}${cdText}</span>
                 </button>
               `
             })()}

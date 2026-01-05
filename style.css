@@ -3850,6 +3850,9 @@ button.cultivating {
   background: rgba(255, 255, 255, 0.55);
   border: 1px solid rgba(0, 0, 0, 0.18);
   border-radius: 8px;
+  color: var(--ink);
+  font-weight: 600;
+}
 
 .profile-audio {
   margin-top: 14px;
@@ -3904,9 +3907,7 @@ button.cultivating {
 .profile-audio-test:hover:not(:disabled) {
   filter: brightness(1.02);
 }
-  color: var(--ink);
-  font-weight: 600;
-}
+
 
 .actions-panel .panel-content {
   max-height: calc(100% - 80px);
@@ -3979,6 +3980,14 @@ button.cultivating {
 .action-button-label {
   position: relative;
   z-index: 1;
+  display: block;
+  font-size: 1.05em;
+  line-height: 1.15;
+}
+
+.action-button-label small {
+  font-size: 0.78em;
+  opacity: 0.95;
 }
 
 .action-button-label .ui-icon {
