@@ -5543,6 +5543,9 @@ function renderSidePanelToggles() {
     togglesContainer.className = 'side-panel-toggles'
     document.body.appendChild(togglesContainer)
   }
+
+  // If we have a 13th toggle (Conquered Sects), expand the grid to show it.
+  togglesContainer.classList.toggle('has-conquered', Boolean(state.cloudConqueredSectsUnlocked))
   
   togglesContainer.innerHTML = `
     <button class="panel-toggle-btn ${state.activeSidePanels.has('stats') ? 'active' : ''}" onclick="window.toggleSidePanel('stats')" title="Stats">
@@ -5560,8 +5563,8 @@ function renderSidePanelToggles() {
     <button class="panel-toggle-btn ${state.activeSidePanels.has('settings') ? 'active' : ''}" onclick="window.toggleSidePanel('settings')" title="Settings">
       ${renderUiIcon('settings', { title: 'Settings' })}
     </button>
-    <button class="panel-toggle-btn ${state.activeSidePanels.has('recipes') ? 'active' : ''}" onclick="window.toggleSidePanel('recipes')" title="Recipe Book">
-      ${renderUiIcon('quests', { title: 'Recipe Book' })}
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('quests') ? 'active' : ''}" onclick="window.toggleSidePanel('quests')" title="Quests">
+      ${renderUiIcon('quests', { title: 'Quests' })}
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('profile') ? 'active' : ''}" onclick="window.toggleSidePanel('profile')" title="Character Profile">
       ${renderUiIcon('profile', { title: 'Character Profile' })}
@@ -5569,8 +5572,8 @@ function renderSidePanelToggles() {
     <button class="panel-toggle-btn ${state.activeSidePanels.has('sect') ? 'active' : ''}" onclick="window.toggleSidePanel('sect')" title="Sect">
       ${renderUiIcon('sect', { title: 'Sect' })}
     </button>
-    <button class="panel-toggle-btn ${state.activeSidePanels.has('quests') ? 'active' : ''}" onclick="window.toggleSidePanel('quests')" title="Quests">
-      ${renderUiIcon('quests', { title: 'Quests' })}
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('recipes') ? 'active' : ''}" onclick="window.toggleSidePanel('recipes')" title="Recipe Book">
+      ${renderUiIcon('quests', { title: 'Recipe Book' })}
     </button>
     <button class="panel-toggle-btn ${state.activeSidePanels.has('moves') ? 'active' : ''}" onclick="window.toggleSidePanel('moves')" title="Moves">
       ${renderUiIcon('moves', { title: 'Moves' })}

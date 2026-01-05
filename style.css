@@ -3379,6 +3379,10 @@ button.cultivating {
     overflow: hidden;
   }
 
+  .side-panel-toggles.has-conquered {
+    grid-template-rows: repeat(5, 44px);
+  }
+
   .panel-toggle-btn {
     width: 44px;
     height: 44px;
@@ -4133,6 +4137,10 @@ button.cultivating {
   gap: 10px;
   z-index: 101;
   overflow: hidden;
+}
+
+.side-panel-toggles.has-conquered {
+  grid-template-rows: repeat(5, 50px);
 }
 
 .panel-toggle-btn {
