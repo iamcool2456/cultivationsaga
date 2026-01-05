@@ -10817,7 +10817,7 @@ function renderCombat(container) {
             const cooldownMs = getPlayerMoveCooldownMs(moveId)
             const disabled = isPlayerMoveDisabled(moveId)
             const preview = getMoveCombatPreview(moveId)
-            const metaText = preview ? `DMG: ${preview.damage}` : ''
+            const metaText = (preview && Number.isFinite(preview.damage)) ? `DMG: ${formatNumber(preview.damage)}` : ''
             const cdTextValue = cooldownMs > 0 ? `Cooldown: ${escapeHtml(formatCooldownMs(cooldownMs))}` : '&nbsp;'
             const metaLine = metaText ? escapeHtml(metaText) : '&nbsp;'
             return `
@@ -17340,7 +17340,7 @@ function renderMoveListItemHtml(moveId) {
 function getMoveListMetaText(moveId) {
   const parts = []
   const preview = getMoveCombatPreview(moveId)
-  if (preview && Number.isFinite(preview.damage)) parts.push(`DMG: ${preview.damage}`)
+  if (preview && Number.isFinite(preview.damage)) parts.push(`DMG: ${formatNumber(preview.damage)}`)
 
   const cd = getMoveBaseCooldownMs(moveId)
   if (cd > 0) parts.push(`CD: ${formatCooldownMs(cd)}`)
