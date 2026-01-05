@@ -949,6 +949,7 @@ const state = {
   // Best-ever progress (persists across rebirth via meta)
   bestMajorRealm: {
     index: 0,
+    subIndex: 0,
     isDemon: false,
     label: ''
   },
@@ -2380,10 +2381,11 @@ window.setLeaderboardConfig = (url, anonKey) => {
 function getCurrentMajorRealmLabel() {
   try {
     const realm = getCurrentCultivationRealm()
+    const stage = `${realm.major}${realm.sub ? ` ${realm.sub}` : ''}`
     if (state.isDemonPath) {
-      return `Demonic Major Realm ${clampNonNegativeInt(state.cultivationMajorIndex) + 1} — ${realm.major}`
+      return `Demonic Major Realm ${clampNonNegativeInt(state.cultivationMajorIndex) + 1} — ${stage}`
     }
-    return `${realm.major}`
+    return stage
   } catch (_) {
     return ''
   }
@@ -2391,24 +2393,32 @@ function getCurrentMajorRealmLabel() {
 
 function syncBestMajorRealm() {
   const idx = clampNonNegativeInt(state.cultivationMajorIndex)
+  const subIdx = clampNonNegativeInt(state.cultivationSubIndex)
   const currentIsDemon = Boolean(state.isDemonPath)
 
   if (!state.bestMajorRealm || typeof state.bestMajorRealm !== 'object') {
-    state.bestMajorRealm = { index: 0, isDemon: false, label: '' }
+    state.bestMajorRealm = { index: 0, subIndex: 0, isDemon: false, label: '' }
   }
 
   const prevIdx = clampNonNegativeInt(state.bestMajorRealm.index)
+  const prevSubIdx = clampNonNegativeInt(state.bestMajorRealm.subIndex)
+
   if (idx < prevIdx) return
+  if (idx === prevIdx && subIdx < prevSubIdx) return
+
+  const shouldUpdateLabel = () => state.bestMajorRealm.label === ''
+    || state.bestMajorRealm.label !== getCurrentMajorRealmLabel()
 
   // If equal index, prefer non-demon label stability; otherwise update.
-  if (idx === prevIdx && Boolean(state.bestMajorRealm.isDemon) && !currentIsDemon) {
+  if (idx === prevIdx && subIdx === prevSubIdx && Boolean(state.bestMajorRealm.isDemon) && !currentIsDemon) {
     state.bestMajorRealm.isDemon = currentIsDemon
     state.bestMajorRealm.label = getCurrentMajorRealmLabel()
     return
   }
 
-  if (idx > prevIdx || state.bestMajorRealm.label === '') {
+  if (idx > prevIdx || subIdx > prevSubIdx || shouldUpdateLabel()) {
     state.bestMajorRealm.index = idx
+    state.bestMajorRealm.subIndex = subIdx
     state.bestMajorRealm.isDemon = currentIsDemon
     state.bestMajorRealm.label = getCurrentMajorRealmLabel()
   }
@@ -2666,6 +2676,7 @@ function saveMeta() {
       rebirthUpgrades: normalizeRebirthUpgrades(state.rebirthUpgrades),
       bestMajorRealm: {
         index: clampNonNegativeInt(state.bestMajorRealm?.index),
+        subIndex: clampNonNegativeInt(state.bestMajorRealm?.subIndex),
         isDemon: Boolean(state.bestMajorRealm?.isDemon),
         label: String(state.bestMajorRealm?.label || '')
       }
@@ -2693,6 +2704,7 @@ function applyMetaFromStorage() {
 
     const best = parsed?.bestMajorRealm
     const bestIdx = clampNonNegativeInt(best?.index)
+    const bestSubIdx = clampNonNegativeInt(best?.subIndex)
     const bestIsDemon = Boolean(best?.isDemon)
     const bestLabel = String(best?.label || '')
 
@@ -2701,8 +2713,9 @@ function applyMetaFromStorage() {
     state.rebirthStoneBonusLast = bonusLast
     state.rebirthUpgrades = normalizeRebirthUpgrades({ ...ups, ...(state.rebirthUpgrades || {}) })
 
-    if (!state.bestMajorRealm || typeof state.bestMajorRealm !== 'object') state.bestMajorRealm = { index: 0, isDemon: false, label: '' }
+    if (!state.bestMajorRealm || typeof state.bestMajorRealm !== 'object') state.bestMajorRealm = { index: 0, subIndex: 0, isDemon: false, label: '' }
     state.bestMajorRealm.index = bestIdx
+    state.bestMajorRealm.subIndex = bestSubIdx
     state.bestMajorRealm.isDemon = bestIsDemon
     state.bestMajorRealm.label = bestLabel
 
@@ -2986,9 +2999,10 @@ function loadGame() {
 
       // Defaults for best-ever progress + leaderboards
       if (!state.bestMajorRealm || typeof state.bestMajorRealm !== 'object') {
-        state.bestMajorRealm = { index: 0, isDemon: false, label: '' }
+        state.bestMajorRealm = { index: 0, subIndex: 0, isDemon: false, label: '' }
       }
       if (!Number.isFinite(state.bestMajorRealm.index) || state.bestMajorRealm.index < 0) state.bestMajorRealm.index = 0
+      if (!Number.isFinite(state.bestMajorRealm.subIndex) || state.bestMajorRealm.subIndex < 0) state.bestMajorRealm.subIndex = 0
       if (typeof state.bestMajorRealm.label !== 'string') state.bestMajorRealm.label = ''
       state.bestMajorRealm.isDemon = Boolean(state.bestMajorRealm.isDemon)
 
@@ -3671,13 +3685,15 @@ window.introContinue = function() {
 // GLOBAL LEADERBOARDS (Supabase REST)
 // ============================================================================
 let __leaderboardSyncTimer = null
-let __leaderboardLastSent = { username: '', rp: -1, bestRp: -1, bestMajor: -1, bestMajorIsDemon: null }
+let __leaderboardLastSent = { username: '', rp: -1, bestRp: -1, bestMajor: -1, bestMajorIsDemon: null, bestMajorLabel: '' }
 
 function getLeaderboardPlayerPayload() {
   const username = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : ''
   const rp = clampNonNegativeInt(state.rebirthPoints)
   const bestRp = clampNonNegativeInt(state.bestRebirthPoints)
-  const bm = state.bestMajorRealm && typeof state.bestMajorRealm === 'object' ? state.bestMajorRealm : { index: 0, isDemon: false, label: '' }
+  const bm = state.bestMajorRealm && typeof state.bestMajorRealm === 'object'
+    ? state.bestMajorRealm
+    : { index: 0, subIndex: 0, isDemon: false, label: '' }
   const bestMajorIndex = clampNonNegativeInt(bm.index)
   const bestMajorIsDemon = Boolean(bm.isDemon)
   const bestMajorLabel = String(bm.label || '')
@@ -3703,6 +3719,7 @@ async function leaderboardUpsertNow() {
     && last.bestRp === payload.best_rebirth_points
     && last.bestMajor === payload.best_major_index
     && last.bestMajorIsDemon === payload.best_major_is_demon
+    && last.bestMajorLabel === payload.best_major_label
   if (same) return true
 
   const cfg = getLeaderboardConfig()
@@ -3729,7 +3746,8 @@ async function leaderboardUpsertNow() {
     rp: payload.rebirth_points,
     bestRp: payload.best_rebirth_points,
     bestMajor: payload.best_major_index,
-    bestMajorIsDemon: payload.best_major_is_demon
+    bestMajorIsDemon: payload.best_major_is_demon,
+    bestMajorLabel: payload.best_major_label
   }
   return true
 }
@@ -8291,7 +8309,7 @@ function renderActionsPanel() {
               : ''
             const isOnCooldown = cd > 0
             return `
-              <button class="action-button" data-action-key=${JSON.stringify(String(key))} data-running="${isRunning ? 1 : 0}" ${isRunning ? 'aria-busy="true"' : ''} style="--progressPct:${progressPct};" onclick="window.executeAction('repeatable', ${index})" ${((action.disabled || isOnCooldown) && !state.devIgnoreRequirements) ? 'disabled' : ''}${hoverAttrs}>
+              <button class="action-button" data-action-key="${escapeHtml(String(key))}" data-running="${isRunning ? 1 : 0}" ${isRunning ? 'aria-busy="true"' : ''} style="--progressPct:${progressPct};" onclick="window.executeAction('repeatable', ${index})" ${((action.disabled || isOnCooldown) && !state.devIgnoreRequirements) ? 'disabled' : ''}${hoverAttrs}>
                 <span class="action-button-label">${renderUiIcon('spark')} ${escapeHtml(getActionDisplayName(action.name))}${cooldownText}</span>
               </button>
             `
@@ -8318,7 +8336,7 @@ function renderActionsPanel() {
               const isOnCooldown = cd > 0
               const cdText = cd > 0 ? `<br><small>Cooldown: ${cd}s</small>` : ''
               return `
-                <button class="action-button special" data-action-key=${JSON.stringify(String(key))} data-running="${isRunning ? 1 : 0}" ${isRunning ? 'aria-busy="true"' : ''} style="--progressPct:${progressPct};" onclick="window.executeAction('special', ${index})" ${((action.disabled || isOnCooldown) && !state.devIgnoreRequirements) ? 'disabled' : ''}${hoverAttrs}>
+                <button class="action-button special" data-action-key="${escapeHtml(String(key))}" data-running="${isRunning ? 1 : 0}" ${isRunning ? 'aria-busy="true"' : ''} style="--progressPct:${progressPct};" onclick="window.executeAction('special', ${index})" ${((action.disabled || isOnCooldown) && !state.devIgnoreRequirements) ? 'disabled' : ''}${hoverAttrs}>
                   <span class="action-button-label">${renderUiIcon('spark')} ${escapeHtml(getActionDisplayName(action.name))}${cdText}</span>
                 </button>
               `
@@ -8329,10 +8347,68 @@ function renderActionsPanel() {
     </div>
     </div>
   `
+
+  // Keep cooldown text and enable/disable states fresh while the Actions panel is open.
+  try { ensureActionsCooldownUiLoop() } catch (_) {}
   
   if (isNewPanel) {
     // Panel was just created
   }
+}
+
+let __actionsCooldownUiTimer = null
+
+function ensureActionsCooldownUiLoop() {
+  const open = Boolean(state.activeSidePanels && state.activeSidePanels.has('actions'))
+  if (!open) {
+    if (__actionsCooldownUiTimer) {
+      try { clearInterval(__actionsCooldownUiTimer) } catch (_) {}
+      __actionsCooldownUiTimer = null
+    }
+    return
+  }
+
+  // Only run the loop if there's at least one visible action on cooldown.
+  const lists = [
+    ...(Array.isArray(state.repeatableActions) ? state.repeatableActions.map(a => getActionKey('repeatable', a)) : []),
+    ...(Array.isArray(state.specialActions) ? state.specialActions.map(a => getActionKey('special', a)) : [])
+  ]
+  const hasCd = lists.some(k => getActionCooldownRemainingMs(k) > 0)
+
+  if (!hasCd) {
+    if (__actionsCooldownUiTimer) {
+      try { clearInterval(__actionsCooldownUiTimer) } catch (_) {}
+      __actionsCooldownUiTimer = null
+    }
+    return
+  }
+
+  if (__actionsCooldownUiTimer) return
+
+  __actionsCooldownUiTimer = setInterval(() => {
+    try {
+      const stillOpen = Boolean(state.activeSidePanels && state.activeSidePanels.has('actions'))
+      if (!stillOpen) {
+        try { clearInterval(__actionsCooldownUiTimer) } catch (_) {}
+        __actionsCooldownUiTimer = null
+        return
+      }
+
+      const keys = [
+        ...(Array.isArray(state.repeatableActions) ? state.repeatableActions.map(a => getActionKey('repeatable', a)) : []),
+        ...(Array.isArray(state.specialActions) ? state.specialActions.map(a => getActionKey('special', a)) : [])
+      ]
+      const any = keys.some(k => getActionCooldownRemainingMs(k) > 0)
+      if (!any) {
+        try { clearInterval(__actionsCooldownUiTimer) } catch (_) {}
+        __actionsCooldownUiTimer = null
+        return
+      }
+
+      // Re-render to refresh countdown text and disabled state.
+      renderActionsPanel()
+    } catch (_) {}
+  }, 1000)
 }
 
 function renderFateRoll(container) {
