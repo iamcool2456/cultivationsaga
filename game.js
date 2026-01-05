@@ -3493,6 +3493,73 @@ function playSfx(kind) {
   else if (k === 'craft') { type = 'sine'; f0 = 520; f1 = 1040; dur = 0.12; peak = 0.14 }
   else if (k === 'rebirth') { type = 'triangle'; f0 = 440; f1 = 1320; dur = 0.14; peak = 0.16 }
 
+  const makeNoiseBuffer = (seconds) => {
+    const s = Math.max(0.01, Number(seconds) || 0.01)
+    const len = Math.max(1, Math.floor(ctx.sampleRate * s))
+    const b = ctx.createBuffer(1, len, ctx.sampleRate)
+    const data = b.getChannelData(0)
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * 0.98
+    return b
+  }
+
+  const playNoise = (seconds, filterType, fStart, fEnd, peakGain, attackSec, releaseSec) => {
+    const src = ctx.createBufferSource()
+    const ng = ctx.createGain()
+    const flt = ctx.createBiquadFilter()
+
+    src.buffer = makeNoiseBuffer(seconds)
+    flt.type = filterType || 'lowpass'
+
+    const durS = Math.max(0.02, Number(seconds) || 0.02)
+    const a = Math.max(0.002, Number(attackSec) || 0.004)
+    const r = Math.max(0.01, Number(releaseSec) || durS)
+    const pk = Math.max(0.0002, Number(peakGain) || 0.10)
+
+    ng.gain.setValueAtTime(0.0001, t0)
+    ng.gain.exponentialRampToValueAtTime(pk, t0 + a)
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + durS)
+
+    const fs0 = Math.max(30, Number(fStart) || 220)
+    const fs1 = Math.max(30, Number(fEnd) || fs0)
+    try {
+      flt.frequency.setValueAtTime(fs0, t0)
+      flt.frequency.exponentialRampToValueAtTime(fs1, t0 + Math.max(0.02, r))
+    } catch (_) {
+      flt.frequency.value = fs0
+    }
+
+    src.connect(flt)
+    flt.connect(ng)
+    ng.connect(__audioSfx)
+    src.start(t0)
+    src.stop(t0 + durS + 0.02)
+    src.onended = () => {
+      try { src.disconnect() } catch (_) {}
+      try { flt.disconnect() } catch (_) {}
+      try { ng.disconnect() } catch (_) {}
+    }
+  }
+
+  // Cinematic SFX (procedural)
+  if (k === 'shoot') {
+    // Short crack + tiny tail
+    try { playNoise(0.06, 'highpass', 1400, 900, 0.10, 0.003, 0.06) } catch (_) {}
+    type = 'square'; f0 = 1900; f1 = 520; dur = 0.055; peak = 0.10
+  } else if (k === 'explosion') {
+    // Low boom + noisy blast
+    try { playNoise(0.85, 'lowpass', 220, 85, 0.18, 0.004, 0.85) } catch (_) {}
+    type = 'sine'; f0 = 85; f1 = 32; dur = 0.65; peak = 0.14
+  } else if (k === 'lightning') {
+    // Crack + rolling thunder
+    try { playNoise(0.12, 'highpass', 2600, 1400, 0.12, 0.002, 0.12) } catch (_) {}
+    try { playNoise(1.35, 'lowpass', 180, 70, 0.16, 0.01, 1.35) } catch (_) {}
+    type = 'sine'; f0 = 58; f1 = 26; dur = 1.05; peak = 0.12
+  } else if (k === 'plane') {
+    // Engine drone / flyover
+    try { playNoise(1.25, 'bandpass', 420, 280, 0.06, 0.02, 1.25) } catch (_) {}
+    type = 'sawtooth'; f0 = 120; f1 = 78; dur = 1.25; peak = 0.06
+  }
+
   osc.type = type
   osc.frequency.setValueAtTime(f0, t0)
   osc.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t0 + dur)
@@ -3510,6 +3577,19 @@ function playSfx(kind) {
     try { g.disconnect() } catch (_) {}
   }
 } 
+
+// Cinematic timer helpers
+let __carpetBombTimers = []
+let __heavensThreeTimers = []
+
+function __clearCinematicTimers(list) {
+  if (!Array.isArray(list)) return
+  for (const id of list) {
+    try { clearTimeout(id) } catch (_) {}
+    try { clearInterval(id) } catch (_) {}
+  }
+  list.length = 0
+}
 
 window.forceLeaderboardSyncNow = async () => {
   if (!isLeaderboardConfigured()) {
@@ -12839,6 +12919,8 @@ function stopCarpetBombCinematic() {
     try { window.removeEventListener('resize', __carpetBombResizeHandler) } catch (_) {}
     __carpetBombResizeHandler = null
   }
+
+  try { __clearCinematicTimers(__carpetBombTimers) } catch (_) {}
 }
 
 function runCarpetBombCinematicCore(opts) {
@@ -12850,9 +12932,9 @@ function runCarpetBombCinematicCore(opts) {
   stopCarpetBombCinematic()
 
   const el = ensureCinematicOverlay()
-  el.classList.remove('active', 'impact', 'fade-out')
+  el.classList.remove('active', 'impact', 'fade-out', 'heavens-assault', 'carpet-bomb')
   void el.offsetWidth
-  el.classList.add('active', 'canvas-mode')
+  el.classList.add('active', 'canvas-mode', 'carpet-bomb')
 
   const canvas = el.querySelector('.cinematic-canvas')
   const gl = canvas && canvas.getContext ? (canvas.getContext('webgl2', { alpha: true, antialias: true }) || canvas.getContext('webgl', { alpha: true, antialias: true })) : null
@@ -12915,6 +12997,22 @@ function runCarpetBombCinematicCore(opts) {
       bombXs[i] = -10
     }
   }
+
+  // Audio: flyover + timed blasts (best-effort; safe if audio disabled)
+  try {
+    __clearCinematicTimers(__carpetBombTimers)
+    const planeCueSec = [0.25, 3.8, 7.2, 10.2]
+    for (const s of planeCueSec) {
+      __carpetBombTimers.push(setTimeout(() => { try { playSfx('plane') } catch (_) {} }, Math.floor(s * 1000)))
+    }
+
+    for (let i = 0; i < usableDrops; i++) {
+      const impactSec = (bombTimes[i] + fallTime)
+      if (!Number.isFinite(impactSec) || impactSec <= 0) continue
+      __carpetBombTimers.push(setTimeout(() => { try { playSfx('explosion') } catch (_) {} }, Math.floor(impactSec * 1000)))
+      __carpetBombTimers.push(setTimeout(() => { try { playSfx('explosion') } catch (_) {} }, Math.floor(impactSec * 1000 + 110)))
+    }
+  } catch (_) {}
 
   const totalDuration = planeDuration + fallTime + 2.2
   const fadeDuration = 0.9
@@ -13207,6 +13305,9 @@ function stopHeavensThreeCinematic() {
     try { window.removeEventListener('resize', __heavensThreeResizeHandler) } catch (_) {}
     __heavensThreeResizeHandler = null
   }
+
+  try { __clearCinematicTimers(__heavensThreeTimers) } catch (_) {}
+
   if (typeof __heavensThreeDispose === 'function') {
     try { __heavensThreeDispose() } catch (_) {}
   }
@@ -13244,9 +13345,9 @@ function runHeavensAssaultCinematicPart1ThreeCore(opts) {
   stopHeavensThreeCinematic()
 
   const el = ensureCinematicOverlay()
-  el.classList.remove('active', 'impact', 'fade-out')
+  el.classList.remove('active', 'impact', 'fade-out', 'heavens-assault', 'carpet-bomb')
   void el.offsetWidth
-  el.classList.add('active', 'canvas-mode')
+  el.classList.add('active', 'canvas-mode', 'heavens-assault')
 
   const canvas = el.querySelector('.cinematic-canvas')
   if (!canvas) {
@@ -13261,12 +13362,89 @@ function runHeavensAssaultCinematicPart1ThreeCore(opts) {
   const fadeDuration = 1.1
   const endAt = totalDuration + fadeDuration
 
+  const __heavensStartNowMs = performance.now()
+
   let renderer = null
   let scene = null
   let camera = null
   let fadePlane = null
   let crackPlane = null
   let crackTexture = null
+
+  // Audio: gunfire bursts + lightning crashes (best-effort)
+  try {
+    __clearCinematicTimers(__heavensThreeTimers)
+
+    // Rapid gunfire in the first part of the assault.
+    const fireStartMs = 650
+    const fireEndMs = 6500
+    const fireIntervalMs = 260
+    __heavensThreeTimers.push(setTimeout(() => {
+      try {
+        const id = setInterval(() => {
+          try {
+            const now = performance.now()
+            // Stop once we pass the window.
+            if (now - __heavensStartNowMs > fireEndMs) {
+              try { clearInterval(id) } catch (_) {}
+              return
+            }
+            if (Math.random() < 0.85) playSfx('shoot')
+          } catch (_) {}
+        }, fireIntervalMs)
+        __heavensThreeTimers.push(id)
+      } catch (_) {}
+    }, fireStartMs))
+
+    // Lightning crashes scattered through the cinematic.
+    const lightningCuesSec = [1.9, 4.1, 6.6, 9.0]
+    for (const s of lightningCuesSec) {
+      __heavensThreeTimers.push(setTimeout(() => { try { playSfx('lightning') } catch (_) {} }, Math.floor(s * 1000)))
+    }
+  } catch (_) {}
+
+  function makeHeavensSkyTexture(seed) {
+    const w = 1024
+    const h = 512
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const g = c.getContext && c.getContext('2d')
+    if (!g) return null
+
+    // Vertical sky gradient (slightly brighter to silhouette planes)
+    const grad = g.createLinearGradient(0, 0, 0, h)
+    grad.addColorStop(0, '#0b1326')
+    grad.addColorStop(0.55, '#16233b')
+    grad.addColorStop(1, '#0a0f1f')
+    g.fillStyle = grad
+    g.fillRect(0, 0, w, h)
+
+    // Soft cloud bands
+    const bandCount = 22
+    for (let i = 0; i < bandCount; i++) {
+      const y = (i / bandCount) * h
+      const a = 0.06 + 0.04 * Math.sin((i + seed) * 1.7)
+      g.fillStyle = `rgba(255,255,255,${Math.max(0, a)})`
+      const x0 = (Math.sin((i + seed) * 2.3) * 0.5 + 0.5) * w
+      const ww = w * (0.35 + 0.25 * (Math.sin((i + seed) * 1.1) * 0.5 + 0.5))
+      g.beginPath()
+      g.ellipse(x0, y, ww, h * 0.03, 0, 0, Math.PI * 2)
+      g.fill()
+    }
+
+    // Slight bright “horizon” band
+    const haze = g.createLinearGradient(0, h * 0.55, 0, h)
+    haze.addColorStop(0, 'rgba(255,255,255,0.05)')
+    haze.addColorStop(1, 'rgba(255,255,255,0)')
+    g.fillStyle = haze
+    g.fillRect(0, h * 0.55, w, h * 0.45)
+
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.needsUpdate = true
+    return tex
+  }
 
   const materialsToFade = []
   function trackMat(m) {
@@ -13623,7 +13801,12 @@ function runHeavensAssaultCinematicPart1ThreeCore(opts) {
 
     // Background sky dome
     const skyGeo = new THREE.SphereGeometry(30, 18, 12)
-    const skyMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x1b2233, side: THREE.BackSide }))
+    const skyTex = makeHeavensSkyTexture(2.7)
+    const skyMat = trackMat(new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      map: skyTex || null,
+      side: THREE.BackSide
+    }))
     const sky = new THREE.Mesh(skyGeo, skyMat)
     scene.add(sky)
 
