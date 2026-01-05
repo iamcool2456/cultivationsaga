@@ -2321,9 +2321,17 @@ function __sanitizeSupabaseUrl(raw) {
 }
 
 function getLeaderboardConfig() {
-  // Vite exposes VITE_* env vars to client bundles.
-  const envUrl = String(import.meta?.env?.VITE_SUPABASE_URL ?? '').trim()
-  const envAnonKey = String(import.meta?.env?.VITE_SUPABASE_ANON_KEY ?? '').trim()
+  // Vite exposes VITE_* env vars to client bundles, but only reliably inlines
+  // them when accessed as `import.meta.env.VITE_*` (no optional chaining).
+  let envUrl = ''
+  let envAnonKey = ''
+  try {
+    envUrl = String(import.meta.env.VITE_SUPABASE_URL || '').trim()
+    envAnonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim()
+  } catch (_) {
+    envUrl = ''
+    envAnonKey = ''
+  }
 
   const win = __readLeaderboardCfgOverrideFromWindow()
   const stored = __readLeaderboardCfgOverrideFromStorage()
