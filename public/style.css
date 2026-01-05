@@ -54,9 +54,93 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 20px;
+  padding: clamp(10px, 2.2vw, 20px);
   position: relative;
   overflow-x: hidden;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Responsive: small screens / Chromebook heights                             */
+/* ------------------------------------------------------------------------- */
+
+/* If the viewport is short (e.g., 1366x768), center-aligned layout can cause
+   the app to feel clipped. Top-align and reduce paddings so it scrolls cleanly. */
+@media (max-height: 820px) {
+  body {
+    align-items: flex-start;
+  }
+
+  .game-screen {
+    padding: 22px;
+  }
+
+  .game-screen::before {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .character-display {
+    padding: 16px;
+    gap: 14px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+
+  .resources {
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .cultivation-silhouette-container {
+    width: min(240px, 70vw);
+    height: min(240px, 70vw);
+  }
+
+  .cultivation-left .cultivate-btn {
+    width: 100%;
+  }
+
+  .log {
+    max-height: 220px;
+  }
+
+  .dev-reset-container {
+    bottom: 12px;
+    left: 12px;
+  }
+}
+
+/* Narrow screens: reduce big paddings and prevent fixed-width blocks from
+   forcing horizontal scroll. */
+@media (max-width: 740px) {
+  body {
+    align-items: flex-start;
+  }
+
+  .fate-screen {
+    padding: 22px;
+  }
+
+  .fate-screen::before {
+    inset: 8px;
+  }
+
+  .game-screen {
+    padding: 20px;
+  }
+
+  .character-display {
+    padding: 14px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .cultivation-silhouette-container {
+    width: min(240px, 76vw);
+    height: min(240px, 76vw);
+  }
 }
 
 /* Paper-style game background (everything except intro/loading) */
