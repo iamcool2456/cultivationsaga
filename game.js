@@ -3497,168 +3497,156 @@ function ensureAmbientMusic() {
   if (__audioMusicNodes && __audioMusicMode !== mode) stopAmbientMusic()
   __audioMusicMode = mode
 
-  // Upgraded lightweight procedural music: chord pad + bass pulse + arpeggio.
-  // (Still tiny + no assets; avoids the “single monotone synth” feel.)
+  // East-Asian-inspired procedural bed: pentatonic flute + light drums.
+  // No audio assets; intentionally simple + airy.
   const t0 = ctx.currentTime
-
-  const tempo = (mode === 'combat') ? 112 : (mode === 'fate') ? 92 : 78
+  const tempo = (mode === 'combat') ? 104 : (mode === 'fate') ? 86 : 74
   const beatSec = 60 / Math.max(30, tempo)
 
-  // Root note per mode (Hz): E2 / C3 / A2-ish.
-  const rootHz = (mode === 'combat') ? 82.41 : (mode === 'fate') ? 130.81 : 110.00
+  const midiToHz = (m) => 440 * Math.pow(2, (Number(m) - 69) / 12)
+  const rootMidi = (mode === 'combat') ? 57 : (mode === 'fate') ? 62 : 55 // A3 / D4 / G3
 
-  const semitone = (n) => rootHz * Math.pow(2, (Number(n) || 0) / 12)
-  const clampT = (x) => Math.max(0.001, Math.min(10, Number(x) || 0.001))
+  // Major pentatonic degrees (0,2,4,7,9) gives a familiar “flute” feel.
+  const pent = [0, 2, 4, 7, 9]
+  const pick = (arr, i) => arr[(i % arr.length + arr.length) % arr.length]
 
   const master = ctx.createGain()
   master.gain.setValueAtTime(0.22, t0)
   master.connect(__audioMusic)
 
-  // Gentle movement: LFO to filter cutoff.
-  const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime((mode === 'combat') ? 0.25 : 0.12, t0)
-  const lfoGain = ctx.createGain(); lfoGain.gain.setValueAtTime((mode === 'combat') ? 380 : 520, t0)
+  // Subtle drone (very low, just to fill space).
+  const droneGain = ctx.createGain(); droneGain.gain.setValueAtTime(0.0001, t0)
+  droneGain.gain.setTargetAtTime(0.03, t0 + 0.05, 0.6)
+  const droneFilter = ctx.createBiquadFilter(); droneFilter.type = 'lowpass'
+  droneFilter.frequency.setValueAtTime(280, t0)
+  droneGain.connect(droneFilter); droneFilter.connect(master)
+  const drone = ctx.createOscillator(); drone.type = 'sine'
+  drone.frequency.setValueAtTime(midiToHz(rootMidi - 24), t0)
+  drone.connect(droneGain)
 
-  // Pad chain.
-  const padGain = ctx.createGain(); padGain.gain.setValueAtTime(0.0001, t0)
-  const padFilter = ctx.createBiquadFilter(); padFilter.type = 'lowpass'
-  padFilter.frequency.setValueAtTime((mode === 'combat') ? 900 : (mode === 'fate') ? 1200 : 1400, t0)
-  padFilter.Q.setValueAtTime(0.8, t0)
-  lfo.connect(lfoGain); lfoGain.connect(padFilter.frequency)
-  padGain.connect(padFilter); padFilter.connect(master)
+  // Flute synth (triangle through bandpass + gentle vibrato).
+  const fluteGain = ctx.createGain(); fluteGain.gain.setValueAtTime(0.0001, t0)
+  const fluteBp = ctx.createBiquadFilter(); fluteBp.type = 'bandpass'
+  fluteBp.frequency.setValueAtTime(1200, t0)
+  fluteBp.Q.setValueAtTime(6.5, t0)
+  fluteGain.connect(fluteBp); fluteBp.connect(master)
+  const flute = ctx.createOscillator(); flute.type = 'triangle'
+  flute.connect(fluteGain)
 
-  // Slow fade-in (prevents click on start).
-  padGain.gain.setTargetAtTime((mode === 'combat') ? 0.16 : 0.18, t0 + 0.02, 0.25)
+  const vib = ctx.createOscillator(); vib.type = 'sine'
+  vib.frequency.setValueAtTime(5.2, t0)
+  const vibAmt = ctx.createGain(); vibAmt.gain.setValueAtTime(12, t0) // cents
+  vib.connect(vibAmt)
+  vibAmt.connect(flute.detune)
 
-  const pad1 = ctx.createOscillator(); pad1.type = 'sawtooth'
-  const pad2 = ctx.createOscillator(); pad2.type = 'triangle'
-  const pad3 = ctx.createOscillator(); pad3.type = 'sine'
-  pad2.detune.setValueAtTime(8, t0)
-  pad1.detune.setValueAtTime(-6, t0)
-  pad1.connect(padGain); pad2.connect(padGain); pad3.connect(padGain)
+  // Light drums: kick + snare + hat.
+  const drumBus = ctx.createGain(); drumBus.gain.setValueAtTime(0.14, t0)
+  const drumLp = ctx.createBiquadFilter(); drumLp.type = 'lowpass'
+  drumLp.frequency.setValueAtTime(5000, t0)
+  drumBus.connect(drumLp); drumLp.connect(master)
 
-  // Bass pulse (separate chain so it stays tight).
-  const bassGain = ctx.createGain(); bassGain.gain.setValueAtTime(0.0001, t0)
-  const bassFilter = ctx.createBiquadFilter(); bassFilter.type = 'lowpass'
-  bassFilter.frequency.setValueAtTime(260, t0)
-  bassGain.connect(bassFilter); bassFilter.connect(master)
-  const bassOsc = ctx.createOscillator(); bassOsc.type = 'sine'; bassOsc.connect(bassGain)
+  // One noise buffer for snare/hat.
+  let noiseBuf = null
+  try {
+    const len = Math.floor(ctx.sampleRate * 0.35)
+    noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const data = noiseBuf.getChannelData(0)
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * 0.7
+  } catch (_) {}
 
-  // Arpeggio pluck.
-  const arpGain = ctx.createGain(); arpGain.gain.setValueAtTime(0.0001, t0)
-  const arpFilter = ctx.createBiquadFilter(); arpFilter.type = 'bandpass'
-  arpFilter.frequency.setValueAtTime((mode === 'combat') ? 1200 : 950, t0)
-  arpFilter.Q.setValueAtTime(7.0, t0)
-  arpGain.connect(arpFilter); arpFilter.connect(master)
-  const arpOsc = ctx.createOscillator(); arpOsc.type = (mode === 'combat') ? 'square' : 'triangle'; arpOsc.connect(arpGain)
-
-  // Minor-ish progression via semitone stacks (keeps it simple + musical).
-  // Each chord: [root, minor third, fifth] with optional color tone.
-  const progression = (mode === 'combat')
-    ? [
-        [0, 3, 7, 10],
-        [-2, 2, 5, 10],
-        [-5, -2, 2, 7],
-        [-7, -4, 0, 5]
-      ]
-    : (mode === 'fate')
-      ? [
-          [0, 3, 7, 14],
-          [-3, 0, 4, 11],
-          [-5, -2, 2, 9],
-          [-7, -4, 0, 7]
-        ]
-      : [
-          [0, 3, 7, 12],
-          [-3, 0, 4, 12],
-          [-5, -2, 2, 9],
-          [-7, -4, 0, 7]
-        ]
-
-  let chordIdx = 0
-  let arpStep = 0
-
-  const setChord = (idx) => {
-    const chord = progression[idx % progression.length]
-    const f1 = semitone(chord[0])
-    const f2 = semitone(chord[1])
-    const f3 = semitone(chord[2])
+  const kick = () => {
     const t = ctx.currentTime
-    try {
-      pad1.frequency.setTargetAtTime(f1, t, clampT(0.08))
-      pad2.frequency.setTargetAtTime(f2, t, clampT(0.08))
-      pad3.frequency.setTargetAtTime(f3, t, clampT(0.08))
-      bassOsc.frequency.setTargetAtTime(f1 / 2, t, clampT(0.02))
-    } catch (_) {
-      pad1.frequency.setValueAtTime(f1, t)
-      pad2.frequency.setValueAtTime(f2, t)
-      pad3.frequency.setValueAtTime(f3, t)
-      bassOsc.frequency.setValueAtTime(f1 / 2, t)
+    const o = ctx.createOscillator(); o.type = 'sine'
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t)
+    o.frequency.setValueAtTime(120, t)
+    o.frequency.exponentialRampToValueAtTime(48, t + 0.12)
+    g.gain.exponentialRampToValueAtTime(mode === 'combat' ? 0.25 : 0.18, t + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18)
+    o.connect(g); g.connect(drumBus)
+    o.start(t); o.stop(t + 0.22)
+    o.onended = () => { try { o.disconnect() } catch (_) {}; try { g.disconnect() } catch (_) {} }
+  }
+
+  const noiseHit = (kind) => {
+    if (!noiseBuf) return
+    const t = ctx.currentTime
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t)
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'
+    bp.frequency.setValueAtTime(kind === 'snare' ? 1800 : 9000, t)
+    bp.Q.setValueAtTime(kind === 'snare' ? 0.9 : 0.7, t)
+    src.connect(bp); bp.connect(g); g.connect(drumBus)
+    const peak = (kind === 'snare') ? 0.10 : 0.05
+    const dur = (kind === 'snare') ? 0.12 : 0.05
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.005)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    src.start(t); src.stop(t + Math.max(0.07, dur + 0.02))
+    src.onended = () => {
+      try { src.disconnect() } catch (_) {}
+      try { bp.disconnect() } catch (_) {}
+      try { g.disconnect() } catch (_) {}
     }
   }
 
-  const pluck = (freq, peak, durSec) => {
+  const playFluteNote = (midi, durBeats) => {
     const t = ctx.currentTime
-    const dur = Math.max(0.03, Number(durSec) || 0.08)
-    const p = Math.max(0.0002, Number(peak) || 0.06)
+    const hz = midiToHz(midi)
+    const dur = Math.max(0.08, (Number(durBeats) || 1) * beatSec)
     try {
-      arpOsc.frequency.setValueAtTime(Math.max(30, freq), t)
-      arpGain.gain.cancelScheduledValues(t)
-      arpGain.gain.setValueAtTime(0.0001, t)
-      arpGain.gain.exponentialRampToValueAtTime(p, t + 0.01)
-      arpGain.gain.exponentialRampToValueAtTime(0.0001, t + dur)
-    } catch (_) {}
+      flute.frequency.setTargetAtTime(hz, t, 0.015)
+    } catch (_) {
+      flute.frequency.setValueAtTime(hz, t)
+    }
+    // Breath envelope.
+    const peak = (mode === 'combat') ? 0.10 : 0.085
+    fluteGain.gain.cancelScheduledValues(t)
+    fluteGain.gain.setValueAtTime(0.0001, t)
+    fluteGain.gain.exponentialRampToValueAtTime(peak, t + 0.02)
+    fluteGain.gain.exponentialRampToValueAtTime(0.0001, t + dur)
   }
 
-  const bassPulse = (peak, durSec) => {
-    const t = ctx.currentTime
-    const dur = Math.max(0.05, Number(durSec) || 0.12)
-    const p = Math.max(0.0002, Number(peak) || 0.08)
-    try {
-      bassGain.gain.cancelScheduledValues(t)
-      bassGain.gain.setValueAtTime(0.0001, t)
-      bassGain.gain.exponentialRampToValueAtTime(p, t + 0.01)
-      bassGain.gain.exponentialRampToValueAtTime(0.0001, t + dur)
-    } catch (_) {}
-  }
+  // Start continuous nodes.
+  drone.start(t0)
+  flute.start(t0)
+  vib.start(t0)
 
-  // Start oscillators.
-  setChord(0)
-  pad1.start(t0); pad2.start(t0); pad3.start(t0)
-  bassOsc.start(t0)
-  arpOsc.start(t0)
-  lfo.start(t0)
-
-  // Timers drive chord changes + bass + arp.
   const timers = []
+  let step = 0
 
-  // Chord changes every 4 beats (one bar). Combat changes faster.
-  const chordEveryBeats = (mode === 'combat') ? 2 : 4
+  // Drum clock: 8th notes.
   timers.push(setInterval(() => {
     if (!__audioCtx || __audioMusicMode !== mode) return
-    chordIdx = (chordIdx + 1) % progression.length
-    setChord(chordIdx)
-  }, Math.max(120, Math.floor(beatSec * 1000 * chordEveryBeats))))
+    const s = step % 16
+    // Kick on 1 and 9 (and extra in combat).
+    if (s === 0 || s === 8 || (mode === 'combat' && (s === 6 || s === 14))) kick()
+    // Snare-ish on 5 and 13.
+    if (s === 4 || s === 12) noiseHit('snare')
+    // Light hat on offbeats.
+    if (s % 2 === 1) noiseHit('hat')
+    step++
+  }, Math.max(40, Math.floor(beatSec * 1000 * 0.5))))
 
-  // Bass pulse on quarter notes.
+  // Flute melody: mostly quarter notes with occasional rests.
+  let melStep = 0
+  const melodyPattern = (mode === 'combat')
+    ? [0, 2, 4, 2, 7, 4, 2, -1, 9, 7, 4, 2, 0, 2, 4, 7]
+    : (mode === 'fate')
+      ? [0, 2, 4, 7, 4, 2, 0, -1, 0, 2, 4, 9, 7, 4, 2, 0]
+      : [0, 2, 4, 7, 4, 2, 0, -1, 0, 2, 4, 2, 0, -1, 2, 0]
+
   timers.push(setInterval(() => {
     if (!__audioCtx || __audioMusicMode !== mode) return
-    bassPulse((mode === 'combat') ? 0.10 : 0.075, (mode === 'combat') ? 0.10 : 0.14)
+    const deg = melodyPattern[melStep % melodyPattern.length]
+    melStep++
+    if (deg === -1) return
+    const octave = (mode === 'combat') ? 2 : 1
+    const degree = pick(pent, deg)
+    const midi = rootMidi + 12 * octave + degree
+    playFluteNote(midi, 1)
   }, Math.max(80, Math.floor(beatSec * 1000))))
 
-  // Arpeggio on 8th notes (walk within current chord + occasional octave).
-  timers.push(setInterval(() => {
-    if (!__audioCtx || __audioMusicMode !== mode) return
-    const chord = progression[chordIdx % progression.length]
-    const pick = [chord[0], chord[1], chord[2], chord[3] ?? chord[2] + 12]
-    const step = pick[arpStep % pick.length]
-    const freq = semitone(step + ((arpStep % 8 === 7) ? 12 : 0))
-    const peak = (mode === 'combat') ? 0.055 : 0.045
-    pluck(freq * 2, peak, (mode === 'combat') ? 0.06 : 0.085)
-    arpStep++
-  }, Math.max(60, Math.floor(beatSec * 1000 * 0.5))))
-
   __audioMusicNodes = {
-    nodes: [master, padGain, padFilter, pad1, pad2, pad3, bassGain, bassFilter, bassOsc, arpGain, arpFilter, arpOsc, lfo, lfoGain],
+    nodes: [master, drumBus, drumLp, droneGain, droneFilter, drone, fluteGain, fluteBp, flute, vib, vibAmt],
     timers
   }
 }
@@ -11907,6 +11895,10 @@ window.advanceRealm = () => {
 
     updateCombatStats() // Update strength and health with new realm multipliers
     log(`📈 You advance to ${newRealm.major} ${newRealm.sub}!`)
+
+    try { syncBestMajorRealm() } catch (_) {}
+    try { saveMeta() } catch (_) {}
+    try { leaderboardScheduleSync('minor_advance') } catch (_) {}
   }
   
   render()
