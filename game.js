@@ -3455,6 +3455,28 @@ function playSfx(kind) {
   }
 } 
 
+window.forceLeaderboardSyncNow = async () => {
+  if (!isLeaderboardConfigured()) {
+    log('Leaderboards are not configured for this build.')
+    return
+  }
+  try {
+    __leaderboardLastSent = { username: '', rp: -1, bestRp: -1, bestMajor: -1, bestMajorIsDemon: null, bestMajorLabel: '' }
+  } catch (_) {}
+
+  try {
+    // Ensure label is in the latest format before syncing.
+    try { syncBestMajorRealm() } catch (_) {}
+    await leaderboardUpsertNow()
+    log('Leaderboard synced.')
+  } catch (e) {
+    const msg = String(e && e.message ? e.message : e)
+    log(`Leaderboard sync failed: ${msg}`)
+  }
+
+  try { window.refreshLeaderboards() } catch (_) {}
+}
+
 function stopAmbientMusic() {
   if (!__audioMusicNodes) return
   try {
@@ -3497,8 +3519,8 @@ function ensureAmbientMusic() {
   if (__audioMusicNodes && __audioMusicMode !== mode) stopAmbientMusic()
   __audioMusicMode = mode
 
-  // East-Asian-inspired procedural bed: pentatonic flute + light drums.
-  // No audio assets; intentionally simple + airy.
+  // East-Asian-inspired procedural bed: pentatonic flute + light drums + plucked strings + gong.
+  // No audio assets; keep it lightweight but more characteristic.
   const t0 = ctx.currentTime
   const tempo = (mode === 'combat') ? 104 : (mode === 'fate') ? 86 : 74
   const beatSec = 60 / Math.max(30, tempo)
@@ -3511,8 +3533,17 @@ function ensureAmbientMusic() {
   const pick = (arr, i) => arr[(i % arr.length + arr.length) % arr.length]
 
   const master = ctx.createGain()
-  master.gain.setValueAtTime(0.22, t0)
-  master.connect(__audioMusic)
+  // Louder overall; we'll add a compressor for headroom.
+  master.gain.setValueAtTime((mode === 'combat') ? 0.62 : 0.55, t0)
+
+  const comp = ctx.createDynamicsCompressor()
+  comp.threshold.setValueAtTime(-26, t0)
+  comp.knee.setValueAtTime(18, t0)
+  comp.ratio.setValueAtTime(7, t0)
+  comp.attack.setValueAtTime(0.004, t0)
+  comp.release.setValueAtTime(0.22, t0)
+  master.connect(comp)
+  comp.connect(__audioMusic)
 
   // Subtle drone (very low, just to fill space).
   const droneGain = ctx.createGain(); droneGain.gain.setValueAtTime(0.0001, t0)
@@ -3540,10 +3571,46 @@ function ensureAmbientMusic() {
   vibAmt.connect(flute.detune)
 
   // Light drums: kick + snare + hat.
-  const drumBus = ctx.createGain(); drumBus.gain.setValueAtTime(0.14, t0)
+  const drumBus = ctx.createGain(); drumBus.gain.setValueAtTime((mode === 'combat') ? 0.20 : 0.17, t0)
   const drumLp = ctx.createBiquadFilter(); drumLp.type = 'lowpass'
   drumLp.frequency.setValueAtTime(5000, t0)
   drumBus.connect(drumLp); drumLp.connect(master)
+
+  // Guzheng-ish pluck (short bright bandpassed saw) for accompaniment.
+  const pluckBus = ctx.createGain(); pluckBus.gain.setValueAtTime(0.0001, t0)
+  const pluckBp = ctx.createBiquadFilter(); pluckBp.type = 'bandpass'
+  pluckBp.frequency.setValueAtTime(1800, t0)
+  pluckBp.Q.setValueAtTime(3.6, t0)
+  pluckBus.connect(pluckBp); pluckBp.connect(master)
+  const pluckOsc = ctx.createOscillator(); pluckOsc.type = 'sawtooth'
+  pluckOsc.detune.setValueAtTime(-6, t0)
+  pluckOsc.connect(pluckBus)
+
+  const gongBus = ctx.createGain(); gongBus.gain.setValueAtTime(0.0001, t0)
+  const gongLp = ctx.createBiquadFilter(); gongLp.type = 'lowpass'
+  gongLp.frequency.setValueAtTime(2400, t0)
+  gongBus.connect(gongLp); gongLp.connect(master)
+
+  const gong = () => {
+    const t = ctx.currentTime
+    const o1 = ctx.createOscillator(); o1.type = 'sine'
+    const o2 = ctx.createOscillator(); o2.type = 'sine'
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t)
+    const base = midiToHz(rootMidi - 12)
+    o1.frequency.setValueAtTime(base, t)
+    o2.frequency.setValueAtTime(base * 2.01, t)
+    o2.detune.setValueAtTime(7, t)
+    g.gain.exponentialRampToValueAtTime((mode === 'combat') ? 0.12 : 0.095, t + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.4)
+    o1.connect(g); o2.connect(g); g.connect(gongBus)
+    o1.start(t); o2.start(t)
+    o1.stop(t + 1.6); o2.stop(t + 1.6)
+    o2.onended = () => {
+      try { o1.disconnect() } catch (_) {}
+      try { o2.disconnect() } catch (_) {}
+      try { g.disconnect() } catch (_) {}
+    }
+  }
 
   // One noise buffer for snare/hat.
   let noiseBuf = null
@@ -3598,20 +3665,37 @@ function ensureAmbientMusic() {
       flute.frequency.setValueAtTime(hz, t)
     }
     // Breath envelope.
-    const peak = (mode === 'combat') ? 0.10 : 0.085
+    const peak = (mode === 'combat') ? 0.14 : 0.12
     fluteGain.gain.cancelScheduledValues(t)
     fluteGain.gain.setValueAtTime(0.0001, t)
     fluteGain.gain.exponentialRampToValueAtTime(peak, t + 0.02)
     fluteGain.gain.exponentialRampToValueAtTime(0.0001, t + dur)
   }
 
+  const playPluck = (midi) => {
+    const t = ctx.currentTime
+    const hz = midiToHz(midi)
+    try { pluckOsc.frequency.setValueAtTime(Math.max(40, hz), t) } catch (_) {}
+    pluckBus.gain.cancelScheduledValues(t)
+    pluckBus.gain.setValueAtTime(0.0001, t)
+    pluckBus.gain.exponentialRampToValueAtTime(0.12, t + 0.008)
+    pluckBus.gain.exponentialRampToValueAtTime(0.0001, t + 0.12)
+  }
+
   // Start continuous nodes.
   drone.start(t0)
   flute.start(t0)
   vib.start(t0)
+  pluckOsc.start(t0)
 
   const timers = []
   let step = 0
+
+  // Gong on downbeats.
+  timers.push(setInterval(() => {
+    if (!__audioCtx || __audioMusicMode !== mode) return
+    gong()
+  }, Math.max(200, Math.floor(beatSec * 1000 * 8))))
 
   // Drum clock: 8th notes.
   timers.push(setInterval(() => {
@@ -3625,6 +3709,20 @@ function ensureAmbientMusic() {
     if (s % 2 === 1) noiseHit('hat')
     step++
   }, Math.max(40, Math.floor(beatSec * 1000 * 0.5))))
+
+  // Plucked accompaniment on offbeats.
+  let plStep = 0
+  timers.push(setInterval(() => {
+    if (!__audioCtx || __audioMusicMode !== mode) return
+    const s = plStep % 16
+    // Hit on 3, 7, 11, 15 (offbeats)
+    if (s === 2 || s === 6 || s === 10 || s === 14) {
+      const degree = pick(pent, (s === 10) ? 3 : 1)
+      const midi = rootMidi + 12 + degree
+      playPluck(midi)
+    }
+    plStep++
+  }, Math.max(60, Math.floor(beatSec * 1000 * 0.5))))
 
   // Flute melody: mostly quarter notes with occasional rests.
   let melStep = 0
@@ -3646,7 +3744,7 @@ function ensureAmbientMusic() {
   }, Math.max(80, Math.floor(beatSec * 1000))))
 
   __audioMusicNodes = {
-    nodes: [master, drumBus, drumLp, droneGain, droneFilter, drone, fluteGain, fluteBp, flute, vib, vibAmt],
+    nodes: [master, comp, drumBus, drumLp, droneGain, droneFilter, drone, fluteGain, fluteBp, flute, vib, vibAmt, pluckBus, pluckBp, pluckOsc, gongBus, gongLp],
     timers
   }
 }
@@ -6968,6 +7066,11 @@ function renderSettingsPanel() {
           End Run (Reset)
         </button>
         <div class="settings-hint">This button unlocks from the Rebirth Tree at 100%.</div>
+      </div>
+
+      <div class="settings-block">
+        <button class="settings-btn" onclick="window.forceLeaderboardSyncNow()">Sync Leaderboard Now</button>
+        <div class="settings-hint">Sends your best cultivation + rebirth stats to the global leaderboard.</div>
       </div>
 
       <div class="profile-audio">
