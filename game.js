@@ -1,9 +1,6 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
-// Bundled background music asset (copied into dist during Vite build).
-import bgMusicUrl from './assets/alex-productions-chinese-new-year.mp3?url'
-
 // ============================================================================
 // CULTIVATION SAGA - Button-Only Cultivation RPG
 // ============================================================================
@@ -3289,7 +3286,8 @@ let __audioButtonClickBound = false
 const __audioLastSfxAtMs = new Map()
 
 // Background music via HTMLAudioElement (asset-backed). Falls back to procedural if missing.
-const __bgMusicAssetSrc = bgMusicUrl
+// Served from Vite's public/ so it exists on GitHub Pages builds.
+const __bgMusicAssetSrc = 'assets/alex-productions-chinese-new-year.mp3'
 let __bgMusicEl = null
 let __bgMusicFailed = false
 
