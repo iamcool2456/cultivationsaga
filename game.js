@@ -965,6 +965,9 @@ const state = {
   },
   leaderboardsTab: 'major',
 
+  // UI toggles
+  showCredits: false,
+
   // Age / Lifespan (months)
   // Cultivating accelerates aging; lifespan can be extended via breakthroughs.
   ageMonths: 0,
@@ -3903,6 +3906,12 @@ window.setAudioMusicVolume = (v) => {
   syncAudioGains()
   ensureAmbientMusic()
   saveGame()
+}
+
+window.toggleCredits = () => {
+  state.showCredits = !Boolean(state.showCredits)
+  saveGame()
+  render()
 }
 
 window.audioTestSfx = () => {
@@ -7207,6 +7216,7 @@ function renderSettingsPanel() {
   const audioEnabled = Boolean(state.audio?.enabled)
   const sfxVol = clampNonNegativeNumber(state.audio?.sfxVolume)
   const musicVol = clampNonNegativeNumber(state.audio?.musicVolume)
+  const showCredits = Boolean(state.showCredits)
 
   const syncAt = clampNonNegativeInt(state.leaderboardsSync?.lastAt)
   const syncOk = Boolean(state.leaderboardsSync?.lastOk)
@@ -7262,16 +7272,18 @@ function renderSettingsPanel() {
       </div>
 
       <div class="settings-block">
-        <div class="settings-block-title">CREDITS</div>
-        <div class="settings-hint">
-          Chinese New Year by Alex-Productions | <a href="https://onsound.eu/" target="_blank" rel="noopener noreferrer">https://onsound.eu/</a>
-          <br>
-          Music promoted by <a href="https://www.free-stock-music.com" target="_blank" rel="noopener noreferrer">https://www.free-stock-music.com</a>
-          <br>
-          Creative Commons / Attribution 3.0 Unported License (CC BY 3.0)
-          <br>
-          <a href="https://creativecommons.org/licenses/by/3.0/deed.en_US" target="_blank" rel="noopener noreferrer">https://creativecommons.org/licenses/by/3.0/deed.en_US</a>
-        </div>
+        <button class="settings-btn" onclick="window.toggleCredits()">${showCredits ? 'Hide Credits' : 'Show Credits'}</button>
+        ${showCredits ? `
+          <div class="settings-hint" style="margin-top:8px">
+            Chinese New Year by Alex-Productions | <a href="https://onsound.eu/" target="_blank" rel="noopener noreferrer">https://onsound.eu/</a>
+            <br>
+            Music promoted by <a href="https://www.free-stock-music.com" target="_blank" rel="noopener noreferrer">https://www.free-stock-music.com</a>
+            <br>
+            Creative Commons / Attribution 3.0 Unported License (CC BY 3.0)
+            <br>
+            <a href="https://creativecommons.org/licenses/by/3.0/deed.en_US" target="_blank" rel="noopener noreferrer">https://creativecommons.org/licenses/by/3.0/deed.en_US</a>
+          </div>
+        ` : ''}
       </div>
     </div>
   `
