@@ -2275,6 +2275,141 @@ button.cultivating {
   overflow: hidden;
 }
 
+/* Leaderboards panel: resizable + tabbed layout */
+#leaderboards-panel {
+  width: min(420px, calc(100vw - 48px));
+  min-width: 320px;
+  min-height: 240px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  resize: both;
+  overflow: auto;
+}
+
+#leaderboards-panel .panel-content {
+  padding: 14px;
+  max-height: calc(100% - 80px);
+}
+
+.leaderboards-tabs {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  margin: 6px 0 12px;
+}
+
+.leaderboards-tab {
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.9em;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  background: #ffffff;
+  color: rgba(17, 24, 39, 0.92);
+  border: 2px solid rgba(0, 0, 0, 0.28);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.10);
+  transform: none;
+}
+
+.leaderboards-tab::before {
+  display: none;
+}
+
+.leaderboards-tab:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.02);
+  transform: none;
+}
+
+.leaderboards-tab.active {
+  background: linear-gradient(180deg, #f0f0f0, #dcdcdc);
+  border-color: rgba(0, 0, 0, 0.40);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.lb-table-header {
+  display: grid;
+  grid-template-columns: 70px 1fr 110px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.18);
+  color: rgba(17, 24, 39, 0.65);
+  font-size: 0.8em;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.lb-table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.lb-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 110px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: #ffffff;
+  border: 2px solid rgba(0, 0, 0, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.10);
+}
+
+.lb-row.is-self {
+  outline: 2px solid rgba(0, 0, 0, 0.55);
+  outline-offset: 2px;
+}
+
+.lb-rank {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-weight: 900;
+  color: rgba(17, 24, 39, 0.85);
+}
+
+.lb-namecell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lb-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 2px solid rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.lb-avatar .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.lb-name {
+  font-weight: 900;
+  color: rgba(17, 24, 39, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-value {
+  text-align: right;
+  font-weight: 900;
+  color: rgba(17, 24, 39, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
 .draggable-panel {
   cursor: move;
 }

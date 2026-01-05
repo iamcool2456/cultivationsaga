@@ -959,6 +959,7 @@ const state = {
     major: { rows: [], loading: false, error: '', fetchedAt: 0 },
     rebirth: { rows: [], loading: false, error: '', fetchedAt: 0 }
   },
+  leaderboardsTab: 'major',
 
   // Age / Lifespan (months)
   // Cultivating accelerates aging; lifespan can be extended via breakthroughs.
@@ -1193,6 +1194,7 @@ const state = {
     quests: { x: 0, y: 0 },
     moves: { x: 0, y: 0 },
     shop: { x: 0, y: 0 },
+    leaderboards: { x: 0, y: 0 },
     conqueredSects: { x: 0, y: 0 },
     // Back-compat: older saves stored separate shop panels.
     townShop: { x: 0, y: 0 },
@@ -2827,11 +2829,16 @@ function loadGame() {
         state.activeSidePanels = new Set()
       }
 
+      // Leaderboards tab default for older saves.
+      if (state.leaderboardsTab !== 'major' && state.leaderboardsTab !== 'rebirth') {
+        state.leaderboardsTab = 'major'
+      }
+
       // Ensure panelPositions exists and has numeric x/y
       if (!state.panelPositions) {
-        state.panelPositions = { stats: { x: 0, y: 0 }, inventory: { x: 0, y: 0 }, actions: { x: 0, y: 0 }, herbalism: { x: 0, y: 0 }, settings: { x: 0, y: 0 }, recipes: { x: 0, y: 0 }, profile: { x: 0, y: 0 }, sect: { x: 0, y: 0 }, quests: { x: 0, y: 0 }, moves: { x: 0, y: 0 }, shop: { x: 0, y: 0 }, conqueredSects: { x: 0, y: 0 }, townShop: { x: 0, y: 0 }, hourShop: { x: 0, y: 0 } }
+        state.panelPositions = { stats: { x: 0, y: 0 }, inventory: { x: 0, y: 0 }, actions: { x: 0, y: 0 }, herbalism: { x: 0, y: 0 }, settings: { x: 0, y: 0 }, recipes: { x: 0, y: 0 }, profile: { x: 0, y: 0 }, sect: { x: 0, y: 0 }, quests: { x: 0, y: 0 }, moves: { x: 0, y: 0 }, shop: { x: 0, y: 0 }, leaderboards: { x: 0, y: 0 }, conqueredSects: { x: 0, y: 0 }, townShop: { x: 0, y: 0 }, hourShop: { x: 0, y: 0 } }
       }
-      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'conqueredSects', 'townShop', 'hourShop']) {
+      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'leaderboards', 'conqueredSects', 'townShop', 'hourShop']) {
         const p = state.panelPositions[key] || {}
         state.panelPositions[key] = {
           x: Number.isFinite(p.x) ? p.x : 0,
@@ -2852,7 +2859,7 @@ function loadGame() {
       if (!state.panelSizes || typeof state.panelSizes !== 'object') {
         state.panelSizes = {}
       }
-      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'conqueredSects', 'townShop', 'hourShop']) {
+      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'leaderboards', 'conqueredSects', 'townShop', 'hourShop']) {
         const s = state.panelSizes[key]
         if (!s || typeof s !== 'object') continue
         const w = Number.isFinite(s.w) ? s.w : undefined
@@ -5588,6 +5595,9 @@ window.toggleSidePanel = function(panelType) {
   // Toggle the panel - if it's already open, close it; otherwise, open it
   if (state.activeSidePanels.has(panelType)) {
     state.activeSidePanels.delete(panelType)
+    if (panelType === 'leaderboards') {
+      try { leaderboardsStopAutoRefresh() } catch (_) {}
+    }
   } else {
     state.activeSidePanels.add(panelType)
     if (panelType === 'profile') {
@@ -5599,6 +5609,7 @@ window.toggleSidePanel = function(panelType) {
     }
     if (panelType === 'leaderboards') {
       try { leaderboardScheduleSync('open_panel') } catch (_) {}
+      try { leaderboardsStartAutoRefresh() } catch (_) {}
       try { window.refreshLeaderboards() } catch (_) {}
     }
   }
@@ -5750,43 +5761,50 @@ function renderLeaderboardsPanel() {
   const major = state.leaderboards?.major || { rows: [], loading: false, error: '', fetchedAt: 0 }
   const rebirth = state.leaderboards?.rebirth || { rows: [], loading: false, error: '', fetchedAt: 0 }
 
-  const selfName = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : 'Wanderer'
-  const selfRealm = state.bestMajorRealm?.label ? String(state.bestMajorRealm.label) : getCurrentMajorRealmLabel()
-  const selfRp = clampNonNegativeInt(state.rebirthPoints)
+  const selfName = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : ''
+  const selfNameNorm = selfName ? selfName.trim().toLowerCase() : ''
 
-  const renderRow = (row, mode) => {
-    const u = String(row?.username || '')
-    const rp = clampNonNegativeInt(row?.rebirth_points)
-    const bestRp = clampNonNegativeInt(row?.best_rebirth_points)
-    const realmLabel = String(row?.best_major_label || '')
-    const realmIdx = clampNonNegativeInt(row?.best_major_index)
-    const realm = realmLabel || (realmIdx >= 0 ? `Major Realm ${realmIdx + 1}` : '')
-    const v = (mode === 'rebirth') ? formatNumber(bestRp) : realm
-    const other = (mode === 'rebirth') ? `Realm: ${escapeHtml(realm)}` : `RP: ${formatNumber(rp)}`
-    return `
-      <div class="inventory-item">
-        <div class="inventory-item-header">
-          <strong>${escapeHtml(u || 'Unknown')}</strong>
-        </div>
-        <div class="inventory-item-desc">${escapeHtml(v)} <span style="opacity:0.8">(${escapeHtml(other)})</span></div>
-      </div>
-    `.trim()
+  if (state.leaderboardsTab !== 'major' && state.leaderboardsTab !== 'rebirth') {
+    state.leaderboardsTab = 'major'
   }
-
-  const majorList = (Array.isArray(major.rows) ? major.rows : []).map(r => renderRow(r, 'major')).join('')
-  const rebirthList = (Array.isArray(rebirth.rows) ? rebirth.rows : []).map(r => renderRow(r, 'rebirth')).join('')
+  const tab = state.leaderboardsTab
 
   const anyLoading = Boolean(major.loading || rebirth.loading)
   const err = String(major.error || rebirth.error || '')
 
+  const renderRankedRow = (row, rank, mode) => {
+    const u = String(row?.username || '')
+    const isSelf = selfNameNorm && u.trim().toLowerCase() === selfNameNorm
+
+    const bestRp = clampNonNegativeInt(row?.best_rebirth_points)
+    const realmLabel = String(row?.best_major_label || '')
+    const realmIdx = clampNonNegativeInt(row?.best_major_index)
+    const realm = realmLabel || (realmIdx >= 0 ? `Major Realm ${realmIdx + 1}` : '')
+    const value = (mode === 'rebirth') ? formatNumber(bestRp) : realm
+
+    return `
+      <div class="lb-row ${isSelf ? 'is-self' : ''}">
+        <div class="lb-rank">#${clampNonNegativeInt(rank)}</div>
+        <div class="lb-namecell">
+          <div class="lb-avatar" aria-hidden="true">${renderUiIcon('profile')}</div>
+          <div class="lb-name">${escapeHtml(u || 'Unknown')}</div>
+        </div>
+        <div class="lb-value">${escapeHtml(String(value || ''))}</div>
+      </div>
+    `.trim()
+  }
+
+  const rowsMajor = Array.isArray(major.rows) ? major.rows : []
+  const rowsRebirth = Array.isArray(rebirth.rows) ? rebirth.rows : []
+  const activeRows = (tab === 'rebirth') ? rowsRebirth : rowsMajor
+  const listHtml = activeRows.map((r, i) => renderRankedRow(r, i + 1, tab)).join('')
+
   panel.innerHTML = `
     <div class="panel-header" onmousedown="window.startDrag(event, 'leaderboards-panel')">
-      <h3>${renderUiIcon('stats', { title: 'Leaderboards' })} Leaderboards</h3>
+      <h3>LEADERBOARD</h3>
       <span class="drag-hint">✥ Drag to move ✥</span>
     </div>
     <div class="panel-content">
-      <div class="settings-hint"><strong>You:</strong> ${escapeHtml(selfName)} — ${escapeHtml(selfRealm || 'Major Realm 1')} — RP: ${formatNumber(selfRp)}</div>
-
       ${!configured ? `
         <div class="inventory-empty">Global leaderboards are not configured for this build.</div>
         <div class="settings-hint">
@@ -5800,25 +5818,86 @@ function renderLeaderboardsPanel() {
       ` : ''}
 
       ${configured ? `
-        <button class="settings-btn" onclick="window.refreshLeaderboards()" ${anyLoading ? 'disabled' : ''}>Refresh</button>
         ${err ? `<div class="password-error" style="display:block; margin-top:8px;">${escapeHtml(err)}</div>` : ''}
 
-        <div class="settings-block" style="margin-top:10px;">
-          <div class="settings-block-title">TOP MAJOR REALM</div>
-          ${majorList || (anyLoading ? '<div class="inventory-empty">Loading...</div>' : '<div class="inventory-empty">No entries yet.</div>')}
+        <div class="leaderboards-tabs" role="tablist" aria-label="Leaderboard tabs">
+          <button class="leaderboards-tab ${tab === 'major' ? 'active' : ''}" onclick="window.setLeaderboardsTab('major')" role="tab" aria-selected="${tab === 'major' ? 'true' : 'false'}">Cultivation LB</button>
+          <button class="leaderboards-tab ${tab === 'rebirth' ? 'active' : ''}" onclick="window.setLeaderboardsTab('rebirth')" role="tab" aria-selected="${tab === 'rebirth' ? 'true' : 'false'}">Rebirth Points LB</button>
         </div>
 
-        <div class="settings-block" style="margin-top:12px;">
-          <div class="settings-block-title">TOP REBIRTH POINTS</div>
-          ${rebirthList || (anyLoading ? '<div class="inventory-empty">Loading...</div>' : '<div class="inventory-empty">No entries yet.</div>')}
+        <div class="lb-table-header">
+          <div class="lb-col lb-col-rank">Rank</div>
+          <div class="lb-col lb-col-name">Name</div>
+          <div class="lb-col lb-col-value">${tab === 'rebirth' ? 'Rebirth' : 'Cultivation'}</div>
+        </div>
+
+        <div class="lb-table" role="table" aria-label="Leaderboard">
+          ${listHtml || (anyLoading ? '<div class="inventory-empty">Loading...</div>' : '<div class="inventory-empty">No entries yet.</div>')}
         </div>
       ` : ''}
     </div>
   `
 
+  // Auto-refresh (no button): fetch on open and keep reasonably fresh.
+  if (configured) {
+    try { leaderboardsStartAutoRefresh() } catch (_) {}
+    const now = Date.now()
+    const fetchedAt = clampNonNegativeInt(major.fetchedAt)
+    if (!anyLoading && (!fetchedAt || (now - fetchedAt) > 20000)) {
+      setTimeout(() => {
+        try { window.refreshLeaderboards() } catch (_) {}
+      }, 0)
+    }
+  } else {
+    try { leaderboardsStopAutoRefresh() } catch (_) {}
+  }
+
   if (isNewPanel) {
     // Panel was just created
   }
+}
+
+let __leaderboardsAutoRefreshTimer = null
+
+function leaderboardsStartAutoRefresh() {
+  if (__leaderboardsAutoRefreshTimer) return
+  __leaderboardsAutoRefreshTimer = setInterval(() => {
+    try {
+      if (!state.activeSidePanels || !state.activeSidePanels.has('leaderboards')) {
+        leaderboardsStopAutoRefresh()
+        return
+      }
+      if (!isLeaderboardConfigured()) return
+      if (!state.leaderboards || typeof state.leaderboards !== 'object') return
+      if (state.leaderboards.major?.loading || state.leaderboards.rebirth?.loading) return
+
+      const last = clampNonNegativeInt(state.leaderboards.major?.fetchedAt)
+      const now = Date.now()
+      // Refresh occasionally so the panel stays up to date without a button.
+      if (!last || (now - last) > 30000) {
+        window.refreshLeaderboards()
+      }
+    } catch (_) {}
+  }, 5000)
+}
+
+function leaderboardsStopAutoRefresh() {
+  if (!__leaderboardsAutoRefreshTimer) return
+  try { clearInterval(__leaderboardsAutoRefreshTimer) } catch (_) {}
+  __leaderboardsAutoRefreshTimer = null
+}
+
+window.setLeaderboardsTab = (tab) => {
+  const t = (String(tab || '') === 'rebirth') ? 'rebirth' : 'major'
+  state.leaderboardsTab = t
+  // If we already have data, just re-render; otherwise try to fetch.
+  try {
+    if (isLeaderboardConfigured()) {
+      const last = clampNonNegativeInt(state.leaderboards?.major?.fetchedAt)
+      if (!last) window.refreshLeaderboards()
+    }
+  } catch (_) {}
+  render()
 }
 
 function renderConqueredSectsPanel() {
