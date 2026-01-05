@@ -2390,6 +2390,23 @@ function getCurrentMajorRealmLabel() {
   }
 }
 
+function getMajorRealmLabelByIndex(majorIndex, subIndex, isDemon) {
+  try {
+    const realmArray = isDemon ? DEMON_REALMS : CULTIVATION_REALMS
+    const mi = clampNonNegativeInt(majorIndex)
+    const si = clampNonNegativeInt(subIndex)
+    const major = realmArray[mi]
+    const subs = major && Array.isArray(major.subRealms) ? major.subRealms : []
+    const sub = subs[si]
+    const majorName = String(major?.major || '')
+    const subName = String(sub?.sub || '')
+    if (!majorName) return ''
+    return subName ? `${majorName}-${subName}` : majorName
+  } catch (_) {
+    return ''
+  }
+}
+
 function syncBestMajorRealm() {
   const idx = clampNonNegativeInt(state.cultivationMajorIndex)
   const subIdx = clampNonNegativeInt(state.cultivationSubIndex)
@@ -2401,6 +2418,16 @@ function syncBestMajorRealm() {
 
   const prevIdx = clampNonNegativeInt(state.bestMajorRealm.index)
   const prevSubIdx = clampNonNegativeInt(state.bestMajorRealm.subIndex)
+
+  // Migration: older saves may have a label without the minor realm.
+  // Refresh it from the stored best indices even if the player is currently below their best.
+  try {
+    const expected = getMajorRealmLabelByIndex(prevIdx, prevSubIdx, Boolean(state.bestMajorRealm.isDemon))
+    if (expected && String(state.bestMajorRealm.label || '') !== expected) {
+      state.bestMajorRealm.label = expected
+      try { leaderboardScheduleSync('best_major_label_migrate') } catch (_) {}
+    }
+  } catch (_) {}
 
   if (idx < prevIdx) return
   if (idx === prevIdx && subIdx < prevSubIdx) return
@@ -2420,6 +2447,7 @@ function syncBestMajorRealm() {
     state.bestMajorRealm.subIndex = subIdx
     state.bestMajorRealm.isDemon = currentIsDemon
     state.bestMajorRealm.label = getCurrentMajorRealmLabel()
+    try { leaderboardScheduleSync('best_major_update') } catch (_) {}
   }
 }
 
@@ -6947,7 +6975,6 @@ function renderSettingsPanel() {
       </div>
 
       <div class="settings-block">
-        <div class="settings-block-title">RUN RESET</div>
         <div class="settings-hint">Unlock progress: <strong>${formatNumber(resetPct)}%</strong></div>
         <button class="settings-btn" onclick="window.endRunViaUnlockedReset()" ${(!resetReady || state.runEnded) ? 'disabled' : ''}>
           End Run (Reset)
