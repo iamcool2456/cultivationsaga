@@ -3291,6 +3291,73 @@ const __bgMusicAssetSrc = 'assets/alex-productions-chinese-new-year.mp3'
 let __bgMusicEl = null
 let __bgMusicFailed = false
 
+// Cinematic SFX via HTMLAudioElement (asset-backed). Falls back to procedural.
+const __sfxMp3ByKind = {
+  shoot: 'assets/sfx/clean-machine-gun-burst-98224.mp3',
+  explosion: 'assets/sfx/explosion-fx-343683.mp3',
+  lightning: 'assets/sfx/peals-of-thunder-191992.mp3',
+  plane: 'assets/sfx/aeroplane-327235.mp3'
+}
+
+const __sfxMp3Pools = new Map()
+const __sfxMp3PoolIndex = new Map()
+const __sfxMp3FailedKinds = new Set()
+
+function __tryPlayMp3Sfx(kind) {
+  ensureAudioState()
+  if (!state.audio?.enabled) return false
+
+  const k = String(kind || '')
+  const src = __sfxMp3ByKind[k]
+  if (!src) return false
+  if (__sfxMp3FailedKinds.has(k)) return false
+
+  let pool = __sfxMp3Pools.get(k)
+  if (!pool) {
+    pool = []
+    const poolSize = 4
+    for (let i = 0; i < poolSize; i++) {
+      try {
+        const el = new Audio()
+        el.preload = 'auto'
+        el.src = src
+        el.addEventListener('error', () => { __sfxMp3FailedKinds.add(k) }, { once: true })
+        pool.push(el)
+      } catch (_) {}
+    }
+    __sfxMp3Pools.set(k, pool)
+    __sfxMp3PoolIndex.set(k, 0)
+  }
+
+  if (!pool || pool.length === 0) return false
+
+  const idx = __sfxMp3PoolIndex.get(k) || 0
+  __sfxMp3PoolIndex.set(k, idx + 1)
+  const el = pool[idx % pool.length]
+  if (!el) return false
+
+  try {
+    const sv = clampNonNegativeNumber(state.audio?.sfxVolume)
+    el.volume = Math.max(0, Math.min(1, sv))
+  } catch (_) {}
+
+  try { el.currentTime = 0 } catch (_) {}
+
+  try {
+    const p = el.play()
+    if (p && typeof p.catch === 'function') {
+      p.catch((e) => {
+        const name = String(e?.name || '')
+        // Autoplay blocks can happen before a user gesture; don't permanently disable.
+        if (name && name !== 'NotAllowedError') __sfxMp3FailedKinds.add(k)
+      })
+    }
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
 const __emojiRegex = (() => {
   try { return new RegExp('\\p{Extended_Pictographic}', 'u') } catch (_) { return null }
 })()
@@ -3409,6 +3476,16 @@ function syncAudioGains() {
     }
   } catch (_) {}
 
+  // HTMLAudioElement cinematic SFX volume.
+  try {
+    for (const pool of __sfxMp3Pools.values()) {
+      if (!Array.isArray(pool)) continue
+      for (const el of pool) {
+        try { if (el) el.volume = Math.max(0, Math.min(1, on ? sfxVol : 0)) } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
   // WebAudio SFX + (procedural fallback) music.
   if (!__audioCtx || !__audioSfx || !__audioMusic) return
   const t = __audioCtx.currentTime
@@ -3468,6 +3545,15 @@ function playSfx(kind) {
     __audioLastSfxAtMs.set(k0, now)
   } catch (_) {}
 
+  const k = String(kind || '')
+
+  // Prefer MP3-backed SFX for cinematic cues; fall back to procedural.
+  if (k === 'shoot' || k === 'explosion' || k === 'lightning' || k === 'plane') {
+    try {
+      if (__tryPlayMp3Sfx(k)) return
+    } catch (_) {}
+  }
+
   const ctx = ensureAudioContext()
   if (!ctx || !__audioSfx) return
   try { if (ctx.state === 'suspended') ctx.resume() } catch (_) {}
@@ -3475,8 +3561,6 @@ function playSfx(kind) {
   const t0 = ctx.currentTime
   const osc = ctx.createOscillator()
   const g = ctx.createGain()
-
-  const k = String(kind || '')
   let type = 'triangle'
   let f0 = 220
   let f1 = 440
