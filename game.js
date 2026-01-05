@@ -1,6 +1,9 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
+// Bundled background music asset (copied into dist during Vite build).
+import bgMusicUrl from './assets/alex-productions-chinese-new-year.mp3?url'
+
 // ============================================================================
 // CULTIVATION SAGA - Button-Only Cultivation RPG
 // ============================================================================
@@ -2394,9 +2397,10 @@ function getMajorRealmLabelByIndex(majorIndex, subIndex, isDemon) {
   try {
     const realmArray = isDemon ? DEMON_REALMS : CULTIVATION_REALMS
     const mi = clampNonNegativeInt(majorIndex)
-    const si = clampNonNegativeInt(subIndex)
     const major = realmArray[mi]
     const subs = major && Array.isArray(major.subRealms) ? major.subRealms : []
+    const siRaw = clampNonNegativeInt(subIndex)
+    const si = subs.length ? Math.max(0, Math.min(subs.length - 1, siRaw)) : 0
     const sub = subs[si]
     const majorName = String(major?.major || '')
     const subName = String(sub?.sub || '')
@@ -3282,7 +3286,7 @@ let __audioButtonClickBound = false
 const __audioLastSfxAtMs = new Map()
 
 // Background music via HTMLAudioElement (asset-backed). Falls back to procedural if missing.
-const __bgMusicAssetSrc = 'assets/alex-productions-chinese-new-year.mp3'
+const __bgMusicAssetSrc = bgMusicUrl
 let __bgMusicEl = null
 let __bgMusicFailed = false
 
