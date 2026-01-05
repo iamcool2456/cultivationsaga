@@ -3269,7 +3269,7 @@ function loadGame() {
 }
 
 // ============================================================================
-// AUDIO (WebAudio: lightweight SFX + ambient)
+// AUDIO (WebAudio SFX + background music)
 // ============================================================================
 let __audioCtx = null
 let __audioMaster = null
@@ -3280,6 +3280,11 @@ let __audioMusicMode = ''
 let __audioInitBound = false
 let __audioButtonClickBound = false
 const __audioLastSfxAtMs = new Map()
+
+// Background music via HTMLAudioElement (asset-backed). Falls back to procedural if missing.
+const __bgMusicAssetSrc = 'assets/alex-productions-chinese-new-year.mp3'
+let __bgMusicEl = null
+let __bgMusicFailed = false
 
 const __emojiRegex = (() => {
   try { return new RegExp('\\p{Extended_Pictographic}', 'u') } catch (_) { return null }
@@ -3325,13 +3330,13 @@ function stripEmojiIconsFromState() {
 
 function ensureAudioState() {
   if (!state.audio || typeof state.audio !== 'object') {
-    state.audio = { enabled: false, sfxVolume: 0.7, musicVolume: 0.35 }
+    state.audio = { enabled: false, sfxVolume: 0.7, musicVolume: 0.6 }
   }
   if (typeof state.audio.enabled !== 'boolean') state.audio.enabled = false
   const sv = Number(state.audio.sfxVolume)
   const mv = Number(state.audio.musicVolume)
   state.audio.sfxVolume = Number.isFinite(sv) ? Math.max(0, Math.min(1, sv)) : 0.7
-  state.audio.musicVolume = Number.isFinite(mv) ? Math.max(0, Math.min(1, mv)) : 0.35
+  state.audio.musicVolume = Number.isFinite(mv) ? Math.max(0, Math.min(1, mv)) : 0.6
 
   // Bind a one-time gesture hook so audio can start on browsers that block autoplay.
   if (!__audioInitBound) {
@@ -3385,10 +3390,22 @@ function ensureAudioContext() {
 
 function syncAudioGains() {
   ensureAudioState()
-  if (!__audioCtx || !__audioSfx || !__audioMusic) return
   const on = Boolean(state.audio?.enabled)
   const sfxVol = clampNonNegativeNumber(state.audio?.sfxVolume)
   const musicVol = clampNonNegativeNumber(state.audio?.musicVolume)
+
+  // HTMLAudioElement music volume.
+  try {
+    if (__bgMusicEl) {
+      __bgMusicEl.volume = Math.max(0, Math.min(1, on ? musicVol : 0))
+      if (!on) {
+        try { __bgMusicEl.pause() } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
+  // WebAudio SFX + (procedural fallback) music.
+  if (!__audioCtx || !__audioSfx || !__audioMusic) return
   const t = __audioCtx.currentTime
   try {
     __audioSfx.gain.setTargetAtTime(on ? sfxVol : 0.0, t, 0.03)
@@ -3397,6 +3414,40 @@ function syncAudioGains() {
     __audioSfx.gain.value = on ? sfxVol : 0.0
     __audioMusic.gain.value = on ? musicVol : 0.0
   }
+}
+
+function ensureBackgroundMp3Music() {
+  ensureAudioState()
+  if (!state.audio?.enabled) return false
+  if (__bgMusicFailed) return false
+
+  if (!__bgMusicEl) {
+    try {
+      const el = new Audio()
+      el.preload = 'auto'
+      el.loop = true
+      el.src = __bgMusicAssetSrc
+      el.addEventListener('error', () => { __bgMusicFailed = true }, { once: true })
+      __bgMusicEl = el
+    } catch (_) {
+      __bgMusicFailed = true
+      return false
+    }
+  }
+
+  try {
+    const mv = clampNonNegativeNumber(state.audio?.musicVolume)
+    __bgMusicEl.volume = Math.max(0, Math.min(1, mv))
+  } catch (_) {}
+
+  try {
+    if (__bgMusicEl.paused) {
+      const p = __bgMusicEl.play()
+      if (p && typeof p.catch === 'function') p.catch(() => {})
+    }
+  } catch (_) {}
+
+  return true
 }
 
 function playSfx(kind) {
@@ -3460,6 +3511,16 @@ window.forceLeaderboardSyncNow = async () => {
     log('Leaderboards are not configured for this build.')
     return
   }
+
+  if (!state.leaderboardsSync || typeof state.leaderboardsSync !== 'object') {
+    state.leaderboardsSync = { lastAt: 0, lastOk: false, lastMsg: '' }
+  }
+  state.leaderboardsSync.lastAt = Date.now()
+  state.leaderboardsSync.lastOk = false
+  state.leaderboardsSync.lastMsg = 'Syncing...'
+  try { saveGame() } catch (_) {}
+  try { render() } catch (_) {}
+
   try {
     __leaderboardLastSent = { username: '', rp: -1, bestRp: -1, bestMajor: -1, bestMajorIsDemon: null, bestMajorLabel: '' }
   } catch (_) {}
@@ -3468,16 +3529,54 @@ window.forceLeaderboardSyncNow = async () => {
     // Ensure label is in the latest format before syncing.
     try { syncBestMajorRealm() } catch (_) {}
     await leaderboardUpsertNow()
-    log('Leaderboard synced.')
+    // Verify what Supabase stored for this username.
+    try {
+      const cfg = getLeaderboardConfig()
+      const u = (state.playerName && String(state.playerName).trim()) ? String(state.playerName).trim() : ''
+      const base = `${cfg.url.replace(/\/+$|\/+$/g, '')}/rest/v1/leaderboard`
+      const url = `${base}?select=username,best_major_label,best_major_index,best_major_is_demon&username=eq.${encodeURIComponent(u)}`
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'apikey': cfg.anonKey, 'Authorization': `Bearer ${cfg.anonKey}` }
+      })
+      if (res.ok) {
+        const data = await res.json().catch(() => [])
+        const row = Array.isArray(data) ? data[0] : null
+        const stored = String(row?.best_major_label || '')
+        state.leaderboardsSync.lastOk = true
+        state.leaderboardsSync.lastMsg = stored
+        log(`Leaderboard synced. Stored label: ${stored || '(empty)'}`)
+      } else {
+        const txt = await res.text().catch(() => '')
+        state.leaderboardsSync.lastOk = true
+        state.leaderboardsSync.lastMsg = 'Synced, but verify fetch failed.'
+        log(`Leaderboard synced. Verify fetch failed (${res.status}): ${txt || res.statusText}`)
+      }
+    } catch (_) {
+      state.leaderboardsSync.lastOk = true
+      state.leaderboardsSync.lastMsg = 'Synced.'
+      log('Leaderboard synced.')
+    }
   } catch (e) {
     const msg = String(e && e.message ? e.message : e)
+    state.leaderboardsSync.lastOk = false
+    state.leaderboardsSync.lastMsg = msg
     log(`Leaderboard sync failed: ${msg}`)
   }
 
   try { window.refreshLeaderboards() } catch (_) {}
+  try { saveGame() } catch (_) {}
+  try { render() } catch (_) {}
 }
 
 function stopAmbientMusic() {
+  try {
+    if (__bgMusicEl) {
+      try { __bgMusicEl.pause() } catch (_) {}
+      try { __bgMusicEl.currentTime = 0 } catch (_) {}
+    }
+  } catch (_) {}
+
   if (!__audioMusicNodes) return
   try {
     // Support both legacy array-form and the newer object-form with timers.
@@ -3505,9 +3604,19 @@ function ensureAmbientMusic() {
     syncAudioGains()
     return
   }
+
+  // Prefer the MP3 background track (asset-backed). If it fails to load, fall back to procedural.
+  const usingMp3 = ensureBackgroundMp3Music()
+  syncAudioGains()
+  if (usingMp3) {
+    // If procedural music was previously active, stop it.
+    if (__audioMusicNodes) stopAmbientMusic()
+    __audioMusicMode = 'mp3'
+    return
+  }
+
   const ctx = ensureAudioContext()
   if (!ctx || !__audioMusic) return
-  syncAudioGains()
 
   const mode = (state.phase === 'COMBAT')
     ? 'combat'
@@ -7046,6 +7155,11 @@ function renderSettingsPanel() {
   const sfxVol = clampNonNegativeNumber(state.audio?.sfxVolume)
   const musicVol = clampNonNegativeNumber(state.audio?.musicVolume)
 
+  const syncAt = clampNonNegativeInt(state.leaderboardsSync?.lastAt)
+  const syncOk = Boolean(state.leaderboardsSync?.lastOk)
+  const syncMsg = String(state.leaderboardsSync?.lastMsg || '')
+  const syncStamp = syncAt ? new Date(syncAt).toLocaleString() : ''
+
   panel.innerHTML = `
     <div class="panel-header" onmousedown="window.startDrag(event, 'settings-panel')">
       <h3>${renderUiIcon('settings', { title: 'Settings' })} Settings</h3>
@@ -7071,6 +7185,7 @@ function renderSettingsPanel() {
       <div class="settings-block">
         <button class="settings-btn" onclick="window.forceLeaderboardSyncNow()">Sync Leaderboard Now</button>
         <div class="settings-hint">Sends your best cultivation + rebirth stats to the global leaderboard.</div>
+        ${syncAt ? `<div class="settings-hint" style="opacity:0.9">Last sync: <strong>${escapeHtml(syncStamp)}</strong> — ${syncOk ? 'OK' : 'FAILED'}${syncMsg ? ` — ${escapeHtml(syncMsg)}` : ''}</div>` : ''}
       </div>
 
       <div class="profile-audio">
@@ -7088,6 +7203,19 @@ function renderSettingsPanel() {
           <span class="profile-audio-label">Music</span>
           <input class="profile-audio-range" type="range" min="0" max="1" step="0.01" value="${escapeHtml(String(musicVol))}" oninput="window.setAudioMusicVolume(this.value)">
         </label>
+      </div>
+
+      <div class="settings-block">
+        <div class="settings-block-title">CREDITS</div>
+        <div class="settings-hint">
+          Chinese New Year by Alex-Productions | <a href="https://onsound.eu/" target="_blank" rel="noopener noreferrer">https://onsound.eu/</a>
+          <br>
+          Music promoted by <a href="https://www.free-stock-music.com" target="_blank" rel="noopener noreferrer">https://www.free-stock-music.com</a>
+          <br>
+          Creative Commons / Attribution 3.0 Unported License (CC BY 3.0)
+          <br>
+          <a href="https://creativecommons.org/licenses/by/3.0/deed.en_US" target="_blank" rel="noopener noreferrer">https://creativecommons.org/licenses/by/3.0/deed.en_US</a>
+        </div>
       </div>
     </div>
   `
