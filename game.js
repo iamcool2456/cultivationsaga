@@ -136,6 +136,14 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;')
 }
 
+function stripTradeoffLines(text) {
+  const raw = String(text || '')
+  if (!raw.trim()) return ''
+  const lines = raw.split(/\r?\n/)
+  const kept = lines.filter(l => !/^\s*Tradeoff\s*:/i.test(String(l || '')))
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 function renderUiIcon(name, opts = {}) {
   const n = String(name || '')
   const size = Number.isFinite(opts.size) ? opts.size : 24
@@ -1566,13 +1574,13 @@ window.hideActionTooltip = () => {
 }
 
 function getActionTooltipText(action) {
-  const desc = (action && typeof action.description === 'string') ? action.description.trim() : ''
+  const desc = stripTradeoffLines((action && typeof action.description === 'string') ? action.description : '')
 
   const rawName = String(action?.name || '').trim() || 'Action'
   const name = rawName.replaceAll('.', '').trim() || 'Action'
 
   const explicitCostText = (typeof action?.costText === 'string') ? action.costText.trim() : ''
-  const explicitTradeoffText = (typeof action?.tradeoffText === 'string') ? action.tradeoffText.trim() : ''
+  // Tradeoffs are intentionally not shown in UI.
 
   // Best-effort cost detection.
   const costParts = []
@@ -1603,19 +1611,17 @@ function getActionTooltipText(action) {
   const derivedCostText = costParts.length ? costParts.join(', ') : 'None'
   const costText = explicitCostText || derivedCostText
 
-  const derivedTradeoffText = costParts.length ? `Spend ${derivedCostText}` : 'None'
-  const tradeoffText = explicitTradeoffText || derivedTradeoffText
-
-  const shouldAppendCosts = Boolean((explicitCostText || costParts.length) && !/(^|\n)Cost\s*:/i.test(desc))
+  // Always ensure a Cost line exists in tooltips.
+  const shouldAppendCosts = !/(^|\n)Cost\s*:/i.test(desc)
 
   if (desc) {
     if (shouldAppendCosts) {
-      return `${desc}\nCost: ${costText}\nTradeoff: ${tradeoffText}`
+      return `${desc}\nCost: ${costText}`
     }
     return desc
   }
 
-  return `${name}\nCost: ${costText}\nTradeoff: ${tradeoffText}`
+  return `${name}\nCost: ${costText}`
 }
 
 function getActionDisplayName(name) {
@@ -5058,9 +5064,9 @@ function getInventoryItemBonuses(item) {
     if (pillFile === 'ying_yang_pill.png' || name === 'Ying-Yang Pill') return ['Use: Instantly grants 30 Qi', 'Bonus: Fully heals you']
     if (pillFile === 'angel_pill.png' || name === 'Angel Pill') return ['Use: Instantly grants 60 Qi', 'Bonus: Fully heals you', 'Bonus: +1 fate reroll']
     if (pillFile === 'lightning_pill.png' || name === 'Lightning Pill') return ['Use: Instantly grants 80 Qi', 'Bonus: +1 stamina']
-    if (pillFile === 'demon_pill.png' || name === 'Demon Pill') return ['Use: Instantly grants 250 Qi', 'Tradeoff: Increases corruption (if enabled)']
-    if (pillFile === 'corruption_pill.png' || name === 'Corruption Pill') return ['Use: Instantly grants 180 Qi', 'Tradeoff: Increases corruption (if enabled)']
-    if (pillFile === 'death_pill.png' || name === 'Death Pill') return ['Use: Instantly grants 500 Qi', 'Tradeoff: Sets HP to 1']
+    if (pillFile === 'demon_pill.png' || name === 'Demon Pill') return ['Use: Instantly grants 250 Qi']
+    if (pillFile === 'corruption_pill.png' || name === 'Corruption Pill') return ['Use: Instantly grants 180 Qi']
+    if (pillFile === 'death_pill.png' || name === 'Death Pill') return ['Use: Instantly grants 500 Qi']
 
     return ['Use: Instantly grants Qi']
   }
@@ -7744,7 +7750,7 @@ function renderActionsPanel() {
           upsertSpecialActionByName({
             name: 'Find heavenly demon manual.',
             icon: '📖',
-            description: 'Cost: Story Luck −55\nRequirement: Story Luck ≥ 55\nOutcome: Obtain Hidden Heavenly Demon Manual\nTradeoff: The option to obtain the demonic manual disappears.',
+            description: 'Cost: Story Luck −55\nRequirement: Story Luck ≥ 55\nOutcome: Obtain Hidden Heavenly Demon Manual',
             disabled: state.luck < 55,
             onStart: () => {
               if (state.luck < 55) return false
@@ -15968,7 +15974,7 @@ window.cloudStoryExploreLibrary = () => {
   upsertSpecialAction({
     name: 'Find heavenly demon manual.',
     icon: '📖',
-    description: 'Cost: Story Luck −55\nRequirement: Story Luck ≥ 55\nOutcome: Obtain Hidden Heavenly Demon Manual\nTradeoff: The option to obtain the demonic manual disappears.',
+    description: 'Cost: Story Luck −55\nRequirement: Story Luck ≥ 55\nOutcome: Obtain Hidden Heavenly Demon Manual',
     disabled: state.luck < 55,
     onStart: () => {
       if (state.luck < 55) return false

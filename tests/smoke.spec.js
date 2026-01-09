@@ -73,6 +73,21 @@ async function openPanel(page, title) {
   await page.locator(`#side-panel-toggles button[title="${title}"]`).click()
 }
 
+async function getVisibleActionTooltipsText(page, button) {
+  // Hover to trigger the tooltip overlay, then read its text.
+  await button.hover()
+  const tip = page.locator('#action-tooltip')
+  await expect(tip).toBeVisible()
+  const text = await tip.innerText()
+  // Move off so next hover isn't affected by pointer position.
+  await page.mouse.move(0, 0)
+  return String(text || '').trim()
+}
+
+function tooltipHasCostLine(text) {
+  return /(^|\n)Cost\s*:\s*\S+/i.test(String(text || ''))
+}
+
 function parsePrice(text) {
   const raw = String(text || '').trim()
   const m = raw.match(/^(\d+)\s+(COPPER|SILVER|GOLD|LOW SPIRIT STONES)$/i)
@@ -117,6 +132,85 @@ test('boots into main game and actions run', async ({ page }) => {
   )
 
   expect(consoleErrors, consoleErrors.join('\n')).toEqual([])
+})
+
+test('actions contract: every visible action shows Cost + no Tradeoff; specials disappear after use', async ({ page }) => {
+  await bootToGame(page)
+
+  // Make actions plentiful and unblocked.
+  await page.evaluate(() => {
+    window.__qa.setState({
+      devIgnoreRequirements: true,
+      stamina: 999,
+      maxStamina: 999,
+      qi: 999_999,
+      copper: 999_999,
+      silver: 999_999,
+      gold: 999_999,
+      spiritStonesLow: 999_999,
+      spiritStonesMid: 999_999,
+      spiritStonesHigh: 999_999,
+      luck: 999
+    })
+  })
+
+  await openPanel(page, 'Actions')
+  const actionsPanel = page.locator('#actions-panel')
+  await expect(actionsPanel).toBeVisible()
+
+  // Ensure at least one action exists.
+  const allButtons = actionsPanel.locator('button.action-button')
+  await expect(allButtons.first()).toBeVisible()
+
+  const count = await allButtons.count()
+  // Keep this test bounded; we only need broad coverage per run.
+  const maxToCheck = Math.min(40, count)
+
+  // 1) Tooltip contract for repeatable + special.
+  for (let i = 0; i < maxToCheck; i++) {
+    const btn = allButtons.nth(i)
+    // Some buttons may be temporarily disabled due to cooldown UI; still must show tooltip.
+    const text = await getVisibleActionTooltipsText(page, btn)
+    expect(text, `Missing tooltip text for action index ${i}`).toBeTruthy()
+    expect(tooltipHasCostLine(text), `Tooltip missing Cost line for action index ${i}: ${text}`).toBeTruthy()
+    expect(/Tradeoff\s*:/i.test(text), `Tooltip still contains Tradeoff for action index ${i}: ${text}`).toBeFalsy()
+  }
+
+  // 2) Special actions are one-time: after completion they should disappear.
+  // In QA mode we can finish timers immediately; for instant specials, executeAction removes them.
+  const specialButtons = actionsPanel.locator('button.action-button.special')
+  const specialsCount = await specialButtons.count()
+  const specialsToRun = Math.min(12, specialsCount)
+
+  for (let i = 0; i < specialsToRun; i++) {
+    // Re-query each loop because the DOM is re-rendered and indices shift.
+    await openPanel(page, 'Actions')
+    const specials = actionsPanel.locator('button.action-button.special')
+    if ((await specials.count()) === 0) break
+
+    const btn = specials.first()
+    const actionKey = await btn.getAttribute('data-action-key')
+    const label = await btn.innerText()
+    await btn.click()
+
+    // If it became a timed action, finish it deterministically.
+    if (actionKey) {
+      const m = String(actionKey).match(/^(special):(.*)$/)
+      if (m) {
+        const name = m[2]
+        await page.evaluate(({ name }) => window.__qa.finishTimedActionNow('special', name), { name })
+      }
+    }
+
+    await openPanel(page, 'Actions')
+    // The exact same actionKey should be gone.
+    if (actionKey) {
+      const remaining = await actionsPanel.locator('button.action-button.special').evaluateAll((els, key) => {
+        return els.filter(e => e && e.getAttribute && e.getAttribute('data-action-key') === key).length
+      }, actionKey)
+      expect(remaining, `Special did not disappear: ${label}`).toBe(0)
+    }
+  }
 })
 
 test('opening Inventory does not reposition Actions panel', async ({ page }) => {
