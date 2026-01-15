@@ -1159,7 +1159,21 @@ const state = {
   devModalMode: 'RESET', // 'RESET' | 'SPEED'
   devSpeed3x: false,
   devIgnoreRequirements: false,
-  activeSidePanels: new Set(), // Set of 'stats', 'inventory', 'actions', 'profile', 'sect', 'quests', 'moves', 'shop', 'herbalism'
+  activeSidePanels: new Set(), // Set of 'stats', 'inventory', 'actions', 'profile', 'sect', 'quests', 'moves', 'shop', 'herbalism', 'mastery'
+
+  // UI hints (one-time tips, onboarding nudges)
+  uiHints: {
+    masteryTipShown: false
+  },
+
+  // Mastery
+  mastery: {
+    mining: {
+      xp: 0,
+      bots: { copper: 0, iron: 0, silver: 0, gold: 0 },
+      carry: { copper: 0, iron: 0, silver: 0, gold: 0 }
+    }
+  },
 
   // Sect panel UI
   sectJoinPickerOpen: false,
@@ -1205,6 +1219,7 @@ const state = {
     quests: { x: 0, y: 0 },
     moves: { x: 0, y: 0 },
     shop: { x: 0, y: 0 },
+    mastery: { x: 0, y: 0 },
     leaderboards: { x: 0, y: 0 },
     conqueredSects: { x: 0, y: 0 },
     // Back-compat: older saves stored separate shop panels.
@@ -1957,7 +1972,47 @@ function getAvailableManualMoves() {
   const tier = (equippedType === learnedType && learnedTier > 0) ? learnedTier : 1
 
   const moves = MANUAL_MOVES[equippedType] || []
-  return moves.filter(m => m.tier <= tier)
+
+  // Combat moves are cooldown-only (no Qi costs). Keep data consistent in the UI.
+  return moves
+    .filter(m => m.tier <= tier)
+    .map(m => ({ ...m, qiCost: 0 }))
+}
+
+function ensureUiHintsState() {
+  if (!state.uiHints || typeof state.uiHints !== 'object') state.uiHints = {}
+  if (typeof state.uiHints.masteryTipShown !== 'boolean') state.uiHints.masteryTipShown = false
+}
+
+function maybeShowMasteryTip() {
+  ensureUiHintsState()
+  if (state.uiHints.masteryTipShown) return
+
+  // Only show when the main game UI is active (side panel toggles are visible).
+  if (state.phase !== 'FARMING' && state.phase !== 'WOOD') return
+
+  state.uiHints.masteryTipShown = true
+  log('Tip: Open the ⛏️ Mastery panel to mine ore and buy bots. Bots mine while the game is open.')
+  try { saveGame() } catch (_) {}
+}
+
+function getNextGoalText(nextCost) {
+  if (state.runEnded) return 'Rebirth to start a new life and spend Rebirth Points.'
+
+  if (state.cultivationMajorIndex === 0 && !state.hasManual) {
+    return 'Buy a cultivation manual so you can Breakthrough out of the first realm.'
+  }
+
+  const cost = Number.isFinite(nextCost?.cost) ? nextCost.cost : null
+  if (cost !== null && state.qi >= cost) {
+    return 'Advance your realm now.'
+  }
+
+  if (!state.isCultivating) {
+    return 'Cultivate to build Qi toward your next realm.'
+  }
+
+  return 'Keep cultivating until you can advance.'
 }
 
 function getEquippedManualType() {
@@ -2883,11 +2938,17 @@ function loadGame() {
         state.leaderboardsTab = 'major'
       }
 
+      // Mastery defaults for older saves
+      try { ensureMasteryState() } catch (_) {}
+
+      // UI hints defaults for older saves
+      try { ensureUiHintsState() } catch (_) {}
+
       // Ensure panelPositions exists and has numeric x/y
       if (!state.panelPositions) {
-        state.panelPositions = { stats: { x: 0, y: 0 }, inventory: { x: 0, y: 0 }, actions: { x: 0, y: 0 }, herbalism: { x: 0, y: 0 }, settings: { x: 0, y: 0 }, recipes: { x: 0, y: 0 }, profile: { x: 0, y: 0 }, sect: { x: 0, y: 0 }, quests: { x: 0, y: 0 }, moves: { x: 0, y: 0 }, shop: { x: 0, y: 0 }, leaderboards: { x: 0, y: 0 }, conqueredSects: { x: 0, y: 0 }, townShop: { x: 0, y: 0 }, hourShop: { x: 0, y: 0 } }
+        state.panelPositions = { stats: { x: 0, y: 0 }, inventory: { x: 0, y: 0 }, actions: { x: 0, y: 0 }, herbalism: { x: 0, y: 0 }, settings: { x: 0, y: 0 }, recipes: { x: 0, y: 0 }, profile: { x: 0, y: 0 }, sect: { x: 0, y: 0 }, quests: { x: 0, y: 0 }, moves: { x: 0, y: 0 }, shop: { x: 0, y: 0 }, mastery: { x: 0, y: 0 }, leaderboards: { x: 0, y: 0 }, conqueredSects: { x: 0, y: 0 }, townShop: { x: 0, y: 0 }, hourShop: { x: 0, y: 0 } }
       }
-      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'leaderboards', 'conqueredSects', 'townShop', 'hourShop']) {
+      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'mastery', 'leaderboards', 'conqueredSects', 'townShop', 'hourShop']) {
         const p = state.panelPositions[key] || {}
         state.panelPositions[key] = {
           x: Number.isFinite(p.x) ? p.x : 0,
@@ -2908,7 +2969,7 @@ function loadGame() {
       if (!state.panelSizes || typeof state.panelSizes !== 'object') {
         state.panelSizes = {}
       }
-      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'leaderboards', 'conqueredSects', 'townShop', 'hourShop']) {
+      for (const key of ['stats', 'inventory', 'actions', 'herbalism', 'settings', 'recipes', 'profile', 'sect', 'quests', 'moves', 'shop', 'mastery', 'leaderboards', 'conqueredSects', 'townShop', 'hourShop']) {
         const s = state.panelSizes[key]
         if (!s || typeof s !== 'object') continue
         const w = Number.isFinite(s.w) ? s.w : undefined
@@ -4928,6 +4989,7 @@ function renderCultivationInfo() {
     : `${minutesLeft} minutes and ${secondsLeftR} seconds`
 
   const equippedManualName = String(state.equipped?.manual || '')
+  const nextGoalText = getNextGoalText(nextCost)
 
   return `
     <div class="cultivation-panel">
@@ -4976,6 +5038,8 @@ function renderCultivationInfo() {
           </button>
           ${nextCost.type === 'breakthrough' && state.cultivationMajorIndex === 0 && !state.hasManual ? '<div class="cultivation-warn">Requires cultivation manual</div>' : ''}
         ` : '<div class="max-realm">Maximum Realm Achieved!</div>'}
+
+        ${nextGoalText ? `<div class="settings-hint">Next Goal: ${escapeHtml(nextGoalText)}</div>` : ''}
       </div>
     </div>
   `
@@ -5330,6 +5394,7 @@ function render() {
   if (state.phase !== 'FATE_ROLL' && state.phase !== 'INTRO_LOADING' && state.phase !== 'STORY_DIALOG') {
     renderSidePanelToggles()
     renderActivePanel()
+    try { maybeShowMasteryTip() } catch (_) {}
   } else {
     // Remove toggle buttons and panels on fate roll screen
     const toggles = document.getElementById('side-panel-toggles')
@@ -5450,44 +5515,9 @@ function attachPanelResizePersistence(el, key) {
 }
 
 function getRebirthNodeIconSrc(nodeId) {
-  const id = String(nodeId || '')
-  const map = {
-    start: 'assets/ying_yang_pill.png',
-    reroll: 'assets/Orthodox_manual.png',
-    bias1: 'assets/gold-coin.png',
-    bias2: 'assets/silver-coin.png',
-    bias3: 'assets/copper-coin.png',
-    min2: 'assets/grass.png',
-    min3: 'assets/grass-manual.png',
-    max6: 'assets/rock.png',
-    max7: 'assets/space.png',
-    reset: 'assets/breakthrough_pill.png',
-    qi_mult: 'assets/ki.png',
-
-    herb_speed: 'assets/grass.png',
-    herb_multi: 'assets/spiritstone-low.png',
-    auto_gather: 'assets/rusted-pickaxe.png',
-    auto_craft: 'assets/herb_pill.png',
-    pill_speed: 'assets/qi_pill.png',
-
-    str_mult: 'assets/gold-sword.png',
-    hp_mult: 'assets/iron_body_pill.png',
-    special_cd: 'assets/battery.png',
-    repeat_speed: 'assets/rusted-axe.png',
-
-    min_roots_plus: 'assets/grass-manual.png',
-
-    root_luck: 'assets/space.png',
-    max_roots_plus: 'assets/rock.png',
-    more_rerolls: 'assets/Orthodox_manual.png',
-    bloodline_luck: 'assets/gold-coin.png',
-    multi_affinity_luck: 'assets/ki.png',
-    affinity_alignment: 'assets/Pentagram.png',
-    story_luck: 'assets/battery.png',
-    spiritstone_rp: 'assets/spiritstone-high.png',
-    quest_drop: 'assets/gold-sword.png'
-  }
-  return map[id] || 'assets/qi_pill.png'
+  // Per request: every rebirth tree node uses the same tree icon.
+  // Reuse an existing tree-like asset so we don't introduce new art files.
+  return 'assets/cherry_blossom.webp'
 }
 
 function getRebirthNodeDefinition(nodeId) {
@@ -6122,6 +6152,10 @@ function renderSidePanelToggles() {
       🛒
     </button>
 
+    <button class="panel-toggle-btn ${state.activeSidePanels.has('mastery') ? 'active' : ''}" onclick="window.toggleSidePanel('mastery')" title="Mastery">
+      ⛏️
+    </button>
+
     <button class="panel-toggle-btn ${state.activeSidePanels.has('leaderboards') ? 'active' : ''}" onclick="window.toggleSidePanel('leaderboards')" title="Leaderboards">
       🏆
     </button>
@@ -6172,6 +6206,7 @@ function renderActivePanel() {
   const questPanel = document.getElementById('quest-panel')
   const movesPanel = document.getElementById('moves-panel')
   const shopPanel = document.getElementById('shop-panel')
+  const masteryPanel = document.getElementById('mastery-panel')
   const conqueredSectsPanel = document.getElementById('conquered-sects-panel')
   const leaderboardsPanel = document.getElementById('leaderboards-panel')
   // Back-compat: remove old separate shop panels if present.
@@ -6220,6 +6255,10 @@ function renderActivePanel() {
   if (shopPanel && !state.activeSidePanels.has('shop')) {
     detachPanelResizePersistence(shopPanel)
     shopPanel.remove()
+  }
+  if (masteryPanel && !state.activeSidePanels.has('mastery')) {
+    detachPanelResizePersistence(masteryPanel)
+    masteryPanel.remove()
   }
   if (conqueredSectsPanel && !state.activeSidePanels.has('conqueredSects')) {
     detachPanelResizePersistence(conqueredSectsPanel)
@@ -6271,6 +6310,9 @@ function renderActivePanel() {
   }
   if (state.activeSidePanels.has('shop')) {
     renderShopPanel()
+  }
+  if (state.activeSidePanels.has('mastery')) {
+    renderMasteryPanel()
   }
   if (state.activeSidePanels.has('conqueredSects')) {
     renderConqueredSectsPanel()
@@ -7396,6 +7438,233 @@ function renderSettingsPanel() {
             <a href="https://creativecommons.org/licenses/by/3.0/deed.en_US" target="_blank" rel="noopener noreferrer">https://creativecommons.org/licenses/by/3.0/deed.en_US</a>
           </div>
         ` : ''}
+      </div>
+    </div>
+  `
+
+  if (isNewPanel) {
+    // Panel was just created
+  }
+}
+
+// ============================================================================
+// MASTERY: MINING
+// ============================================================================
+function ensureMasteryState() {
+  if (!state.mastery || typeof state.mastery !== 'object') state.mastery = {}
+  if (!state.mastery.mining || typeof state.mastery.mining !== 'object') {
+    state.mastery.mining = { xp: 0, bots: { copper: 0, iron: 0, silver: 0, gold: 0 }, carry: { copper: 0, iron: 0, silver: 0, gold: 0 } }
+  }
+  const m = state.mastery.mining
+  if (!Number.isFinite(m.xp) || m.xp < 0) m.xp = 0
+  if (!m.bots || typeof m.bots !== 'object') m.bots = { copper: 0, iron: 0, silver: 0, gold: 0 }
+  if (!m.carry || typeof m.carry !== 'object') m.carry = { copper: 0, iron: 0, silver: 0, gold: 0 }
+  for (const k of ['copper', 'iron', 'silver', 'gold']) {
+    if (!Number.isFinite(m.bots[k]) || m.bots[k] < 0) m.bots[k] = 0
+    m.bots[k] = Math.floor(m.bots[k])
+    if (!Number.isFinite(m.carry[k]) || m.carry[k] < 0) m.carry[k] = 0
+  }
+}
+
+function getMiningLevel() {
+  ensureMasteryState()
+  const xp = clampNonNegativeInt(state.mastery.mining.xp)
+  // Simple: 100 XP per level.
+  return 1 + Math.floor(xp / 100)
+}
+
+function getMiningXpToNextLevel() {
+  const lvl = getMiningLevel()
+  const nextAt = lvl * 100
+  const xp = clampNonNegativeInt(state.mastery.mining.xp)
+  return Math.max(0, nextAt - xp)
+}
+
+function getMiningManualYield() {
+  const lvl = getMiningLevel()
+  // +1 copper ore every 5 levels.
+  return 1 + Math.floor((lvl - 1) / 5)
+}
+
+function getMiningBotYieldMultiplier() {
+  const lvl = getMiningLevel()
+  // +5% per level.
+  return 1 + (0.05 * (lvl - 1))
+}
+
+function getMiningConfig() {
+  return {
+    tiers: [
+      { key: 'copper', oreName: 'Copper Ore', botName: 'Copper Mining Bot', basePerSec: 1.0, cost: { name: 'Copper Ore', qty: 25 } },
+      { key: 'iron', oreName: 'Iron Ore', botName: 'Iron Mining Bot', basePerSec: 0.6, cost: { name: 'Copper Ore', qty: 250 } },
+      { key: 'silver', oreName: 'Silver Ore', botName: 'Silver Mining Bot', basePerSec: 0.35, cost: { name: 'Iron Ore', qty: 250 } },
+      { key: 'gold', oreName: 'Gold Ore', botName: 'Gold Mining Bot', basePerSec: 0.20, cost: { name: 'Silver Ore', qty: 250 } }
+    ]
+  }
+}
+
+function addOreToInventory(oreName, qty) {
+  const n = String(oreName || '').trim()
+  const q = clampNonNegativeInt(qty)
+  if (!n || q <= 0) return
+  addToInventory({
+    name: n,
+    kind: 'ore',
+    description: 'A chunk of raw ore. Useful for building mining bots.',
+    quantity: q
+  })
+}
+
+window.mineOre = () => {
+  if (state.phase === 'FATE') return
+  ensureMasteryState()
+  const gained = getMiningManualYield()
+  addOreToInventory('Copper Ore', gained)
+  state.mastery.mining.xp = clampNonNegativeInt(state.mastery.mining.xp) + gained
+  log(`You mine. +${formatNumber(gained)} Copper Ore.`)
+  render()
+  saveGame()
+}
+
+window.buyMiningBot = (tierKey) => {
+  ensureMasteryState()
+  const key = String(tierKey || '')
+  const cfg = getMiningConfig().tiers.find(t => t.key === key)
+  if (!cfg) return
+
+  const costName = String(cfg.cost?.name || '')
+  const costQty = clampNonNegativeInt(cfg.cost?.qty)
+  if (!costName || costQty <= 0) return
+
+  if (!state.devIgnoreRequirements) {
+    if (getInventoryQuantityByName(costName) < costQty) return
+    if (!consumeInventoryByName(costName, costQty)) return
+  }
+
+  state.mastery.mining.bots[key] = clampNonNegativeInt(state.mastery.mining.bots[key]) + 1
+  log(`Purchased: ${cfg.botName}.`)
+  render()
+  saveGame()
+}
+
+function tickMiningBots(seconds) {
+  ensureMasteryState()
+  const sec = clampNonNegativeNumber(seconds)
+  if (!(sec > 0)) return { changed: false }
+
+  const mult = getMiningBotYieldMultiplier()
+  const cfg = getMiningConfig()
+  const m = state.mastery.mining
+  let changed = false
+
+  for (const t of cfg.tiers) {
+    const count = clampNonNegativeInt(m.bots[t.key])
+    if (count <= 0) continue
+
+    const perSec = (Number(t.basePerSec) || 0) * mult
+    if (!(perSec > 0)) continue
+    const raw = count * perSec * sec
+
+    m.carry[t.key] = clampNonNegativeNumber(m.carry[t.key]) + raw
+    const grant = Math.floor(m.carry[t.key])
+    if (grant > 0) {
+      m.carry[t.key] -= grant
+      addOreToInventory(t.oreName, grant)
+      m.xp = clampNonNegativeInt(m.xp) + grant
+      changed = true
+    }
+  }
+
+  return { changed }
+}
+
+function renderMasteryPanel() {
+  ensureMasteryState()
+
+  let panel = document.getElementById('mastery-panel')
+  const isNewPanel = !panel
+
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.id = 'mastery-panel'
+    panel.className = 'draggable-panel stats-panel'
+
+    applySavedPanelSize(panel, 'mastery')
+    getSidePanelsMount().appendChild(panel)
+    attachPanelResizePersistence(panel, 'mastery')
+
+    const pos = state.panelPositions?.mastery
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      panel.style.transform = `translate(${pos.x}px, ${pos.y}px)`
+    }
+  }
+
+  const lvl = getMiningLevel()
+  const xp = clampNonNegativeInt(state.mastery.mining.xp)
+  const toNext = getMiningXpToNextLevel()
+  const manualYield = getMiningManualYield()
+  const botMult = getMiningBotYieldMultiplier()
+
+  const tiers = getMiningConfig().tiers
+  const oreRows = tiers.map(t => {
+    const have = getInventoryQuantityByName(t.oreName)
+    return `<div style="display:flex; justify-content:space-between; gap:10px;"><span>${escapeHtml(t.oreName)}</span><strong>${formatNumber(have)}</strong></div>`
+  }).join('')
+
+  const botRows = tiers.map(t => {
+    const haveBots = clampNonNegativeInt(state.mastery.mining.bots[t.key])
+    const costName = String(t.cost?.name || '')
+    const costQty = clampNonNegativeInt(t.cost?.qty)
+    const canAfford = state.devIgnoreRequirements || (getInventoryQuantityByName(costName) >= costQty)
+
+    const perSecEach = (Number(t.basePerSec) || 0) * botMult
+    const perSecTotal = perSecEach * haveBots
+    return `
+      <div style="border-top:1px solid rgba(0,0,0,0.08); padding-top:10px; margin-top:10px;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+          <div>
+            <div><strong>${escapeHtml(t.botName)}</strong></div>
+            <div style="opacity:0.8; font-size:0.92em;">Mines ${escapeHtml(t.oreName)} — You own: <strong>${formatNumber(haveBots)}</strong></div>
+            <div style="opacity:0.8; font-size:0.92em;">Rate: ${formatNumber(perSecTotal)} / sec (each ${formatNumber(perSecEach)} / sec)</div>
+          </div>
+          <div style="text-align:right;">
+            <button class="settings-btn" onclick="window.buyMiningBot('${escapeHtml(t.key)}')" ${canAfford ? '' : 'disabled'}>
+              Buy (${formatNumber(costQty)} ${escapeHtml(costName)})
+            </button>
+          </div>
+        </div>
+      </div>
+    `.trim()
+  }).join('')
+
+  panel.innerHTML = `
+    <div class="panel-header" onmousedown="window.startDrag(event, 'mastery-panel')">
+      <h3>⛏️ Mastery</h3>
+      <span class="drag-hint">✥ Drag to move ✥</span>
+    </div>
+    <div class="panel-content">
+      <div class="settings-block">
+        <div class="settings-block-title">MINING</div>
+        <div class="settings-hint">Level: <strong>${formatNumber(lvl)}</strong> — XP: <strong>${formatNumber(xp)}</strong> (Next in ${formatNumber(toNext)})</div>
+        <div class="settings-hint">Manual mine: +<strong>${formatNumber(manualYield)}</strong> Copper Ore per click</div>
+        <div class="settings-hint">Bot efficiency: <strong>${formatMultiplier(botMult)}</strong></div>
+        <div class="settings-hint">Bots mine while the game is open. (No offline progress yet.)</div>
+        <button class="settings-btn" onclick="window.mineOre()">Mine</button>
+      </div>
+
+      <div class="settings-block">
+        <div class="settings-block-title">ORES</div>
+        ${oreRows}
+      </div>
+
+      <div class="settings-block">
+        <div class="settings-block-title">BOTS</div>
+        ${botRows}
+      </div>
+
+      <div class="settings-block">
+        <div class="settings-block-title">OTHER MASTERIES</div>
+        <div class="settings-hint">More masteries can go here later (e.g. Herbalism, Combat, Business). This panel is wired so adding more is straightforward.</div>
       </div>
     </div>
   `
@@ -19622,6 +19891,15 @@ setInterval(() => {
   let needsSave = false
 
   const speed = state.devSpeed3x ? 3 : 1
+
+  // Mining bots (Mastery)
+  try {
+    const res = tickMiningBots(1 * speed)
+    if (res && res.changed) {
+      needsRender = true
+      needsSave = true
+    }
+  } catch (_) {}
 
   // Tick down player cooldowns (outside combat only; combat loop handles ms cooldowns during fights)
   if (!state.inCombat) {

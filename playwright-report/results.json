@@ -92,12 +92,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 5049,
+                  "duration": 5073,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T23:03:36.893Z",
+                  "startTime": "2026-01-15T23:32:11.224Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -126,12 +126,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 11031,
+                  "duration": 11283,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T23:03:42.007Z",
+                  "startTime": "2026-01-15T23:32:16.373Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -160,12 +160,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4446,
+                  "duration": 4892,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T23:03:53.047Z",
+                  "startTime": "2026-01-15T23:32:27.665Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -194,12 +194,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4499,
+                  "duration": 4788,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T23:03:57.501Z",
+                  "startTime": "2026-01-15T23:32:32.568Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -228,12 +228,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4421,
+                  "duration": 4517,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T23:04:02.007Z",
+                  "startTime": "2026-01-15T23:32:37.365Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -262,12 +262,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4825,
+                  "duration": 4956,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T23:04:06.435Z",
+                  "startTime": "2026-01-15T23:32:41.889Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -296,12 +296,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4950,
+                  "duration": 4592,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T23:04:11.266Z",
+                  "startTime": "2026-01-15T23:32:46.854Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -319,8 +319,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-01-15T23:03:35.068Z",
-    "duration": 41348.01,
+    "startTime": "2026-01-15T23:32:09.257Z",
+    "duration": 42417.893000000004,
     "expected": 7,
     "skipped": 0,
     "unexpected": 0,
