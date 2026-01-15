@@ -6817,7 +6817,7 @@ function renderHerbalismPanel() {
             <div class="herbalism-picker-list">
               ${herbs
                 .filter(h => (ignore ? true : (getInventoryQuantityByName(h.name) > 0)))
-                .map(h => `<button class="herbalism-picker-item" type="button" onclick="window.setHerbCraftSlot(${state.herbalismCraftPickerIndex}, ${JSON.stringify(String(h.name))})">${escapeHtml(h.name)} (${formatNumber(getInventoryQuantityByName(h.name))})</button>`)
+                .map(h => `<button class="herbalism-picker-item" type="button" onclick='window.setHerbCraftSlot(${state.herbalismCraftPickerIndex}, ${JSON.stringify(String(h.name))})'>${escapeHtml(h.name)} (${formatNumber(getInventoryQuantityByName(h.name))})</button>`)
                 .join('') || '<div class="inventory-empty">No herbs available.</div>'}
             </div>
             <div class="herbalism-picker-actions">
