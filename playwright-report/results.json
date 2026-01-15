@@ -92,12 +92,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4795,
+                  "duration": 5049,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T22:54:48.693Z",
+                  "startTime": "2026-01-15T23:03:36.893Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -107,7 +107,41 @@
           ],
           "id": "2c14808d47b386fba9eb-081b904d5c0c86dafaaa",
           "file": "smoke.spec.js",
-          "line": 103,
+          "line": 118,
+          "column": 1
+        },
+        {
+          "title": "actions contract: every visible action shows Cost + no Tradeoff; specials disappear after use",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11031,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-01-15T23:03:42.007Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2c14808d47b386fba9eb-bf07a1e5777593cf2301",
+          "file": "smoke.spec.js",
+          "line": 137,
           "column": 1
         },
         {
@@ -126,12 +160,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4414,
+                  "duration": 4446,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T22:54:53.704Z",
+                  "startTime": "2026-01-15T23:03:53.047Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -141,7 +175,7 @@
           ],
           "id": "2c14808d47b386fba9eb-7545c20e47bbd59479bc",
           "file": "smoke.spec.js",
-          "line": 122,
+          "line": 216,
           "column": 1
         },
         {
@@ -160,12 +194,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4551,
+                  "duration": 4499,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T22:54:58.126Z",
+                  "startTime": "2026-01-15T23:03:57.501Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -175,7 +209,7 @@
           ],
           "id": "2c14808d47b386fba9eb-3635166da039c20928f6",
           "file": "smoke.spec.js",
-          "line": 142,
+          "line": 236,
           "column": 1
         },
         {
@@ -194,12 +228,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4479,
+                  "duration": 4421,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T22:55:02.687Z",
+                  "startTime": "2026-01-15T23:04:02.007Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -209,7 +243,7 @@
           ],
           "id": "2c14808d47b386fba9eb-098e3f3abb0dc461bbc6",
           "file": "smoke.spec.js",
-          "line": 181,
+          "line": 275,
           "column": 1
         },
         {
@@ -228,12 +262,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 5428,
+                  "duration": 4825,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T22:55:07.176Z",
+                  "startTime": "2026-01-15T23:04:06.435Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -243,7 +277,7 @@
           ],
           "id": "2c14808d47b386fba9eb-778611c47785176d9fe1",
           "file": "smoke.spec.js",
-          "line": 205,
+          "line": 299,
           "column": 1
         },
         {
@@ -262,12 +296,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 5014,
+                  "duration": 4950,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-01-15T22:55:12.612Z",
+                  "startTime": "2026-01-15T23:04:11.266Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -277,7 +311,7 @@
           ],
           "id": "2c14808d47b386fba9eb-dda52adfeb67efaa47b6",
           "file": "smoke.spec.js",
-          "line": 253,
+          "line": 347,
           "column": 1
         }
       ]
@@ -285,9 +319,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-01-15T22:54:46.997Z",
-    "duration": 30810.285,
-    "expected": 6,
+    "startTime": "2026-01-15T23:03:35.068Z",
+    "duration": 41348.01,
+    "expected": 7,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

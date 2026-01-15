@@ -1,7 +1,7 @@
 # QA Summary
 
-- Total: 6
-- Passed: 6
+- Total: 7
+- Passed: 7
 - Failed: 0
 - Skipped: 0
 

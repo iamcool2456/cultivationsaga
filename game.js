@@ -6770,7 +6770,12 @@ function renderHerbalismPanel() {
 
   const slots = state.herbalismCraftSlots.map(s => (typeof s === 'string' && s.trim()) ? s.trim() : '')
   const filled = slots.filter(Boolean).length
-  const canCraft = ignore ? (filled === 3) : (filled === 3 && slots.every(h => getInventoryQuantityByName(h) >= 1))
+  const chosen = multisetFromList(slots.filter(Boolean))
+  const hasEnoughForSelection = Object.keys(chosen).every(herb => getInventoryQuantityByName(herb) >= chosen[herb])
+  const canCraft = ignore ? (filled === 3) : (filled === 3 && hasEnoughForSelection)
+
+  const pickerIndex = clampNonNegativeInt(state.herbalismCraftPickerIndex)
+  const chosenWithoutPicker = multisetFromList(slots.filter((v, idx) => Boolean(v) && idx !== pickerIndex))
 
   panel.innerHTML = `
     <div class="panel-header" onmousedown="window.startDrag(event, 'herbalism-panel')">
@@ -6817,7 +6822,13 @@ function renderHerbalismPanel() {
             <div class="herbalism-picker-list">
               ${herbs
                 .filter(h => (ignore ? true : (getInventoryQuantityByName(h.name) > 0)))
-                .map(h => `<button class="herbalism-picker-item" type="button" onclick='window.setHerbCraftSlot(${state.herbalismCraftPickerIndex}, ${JSON.stringify(String(h.name))})'>${escapeHtml(h.name)} (${formatNumber(getInventoryQuantityByName(h.name))})</button>`)
+                .map(h => {
+                  const name = String(h.name || '')
+                  const inv = getInventoryQuantityByName(name)
+                  const need = (chosenWithoutPicker[name] || 0) + 1
+                  const disabled = (!ignore && inv < need) ? 'disabled' : ''
+                  return `<button class="herbalism-picker-item" type="button" ${disabled} onclick='window.setHerbCraftSlot(${state.herbalismCraftPickerIndex}, ${JSON.stringify(name)})'>${escapeHtml(name)} (${formatNumber(inv)})</button>`
+                })
                 .join('') || '<div class="inventory-empty">No herbs available.</div>'}
             </div>
             <div class="herbalism-picker-actions">
@@ -7112,6 +7123,19 @@ window.setHerbCraftSlot = (slotIndex, herbName) => {
   if (!Array.isArray(state.herbalismCraftSlots) || state.herbalismCraftSlots.length !== 3) state.herbalismCraftSlots = [null, null, null]
   const n = String(herbName || '').trim()
   if (!n) return
+
+  if (!state.devIgnoreRequirements) {
+    const current = state.herbalismCraftSlots.map(s => (typeof s === 'string' && s.trim()) ? s.trim() : '')
+    const withoutThisSlot = current.filter((v, idx) => Boolean(v) && idx !== i)
+    const used = multisetFromList(withoutThisSlot)
+    const need = (used[n] || 0) + 1
+    const inv = getInventoryQuantityByName(n)
+    if (inv < need) {
+      log(`Not enough ${n}. Need ${need}, have ${inv}.`)
+      return
+    }
+  }
+
   state.herbalismCraftSlots[i] = n
   state.herbalismCraftPickerIndex = -1
   render()
