@@ -6020,13 +6020,12 @@ function renderRebirthNodeModal() {
     const d = getRebirthNodeDefinition(rid)
     return Boolean(d.purchased)
   }
-  const locked = prereq.some(r => !prereqPurchased(r))
+  const locked = prereq.length ? !prereq.every(prereqPurchased) : false
+  const canBuy = typeof def.canBuy === 'function' ? Boolean(def.canBuy()) : !Boolean(def.purchased)
+  const iconEmoji = '🌳'
   const cost = clampNonNegativeInt(def.cost)
   const afford = pts >= cost
-  const canBuy = (typeof def.canBuy === 'function' ? Boolean(def.canBuy()) : true)
   const buyDisabled = locked || cost <= 0 || !afford || !canBuy
-
-  const iconSrc = escapeHtml(String(getRebirthNodeIconSrc(def.id) || ''))
   const levelText = typeof def.levelText === 'function' ? String(def.levelText() || '') : ''
   const nextText = typeof def.nextText === 'function' ? String(def.nextText() || '') : ''
   const prereqText = prereq.length ? `Requires: ${prereq.map(p => escapeHtml(String(getRebirthNodeDefinition(p).name || p))).join(', ')}` : ''
@@ -6034,7 +6033,7 @@ function renderRebirthNodeModal() {
   modal.innerHTML = `
     <div class="modal-content">
       <div class="rebirth-node-modal-top">
-        <img class="rebirth-node-icon" src="${iconSrc}" alt="" />
+        <div class="rebirth-node-icon" aria-hidden="true">${iconEmoji}</div>
         <h2>${escapeHtml(String(def.name || 'Node'))}</h2>
       </div>
       <p>${escapeHtml(String(def.description || ''))}</p>
@@ -7503,6 +7502,36 @@ function getMiningConfig() {
   }
 }
 
+function getOreSellValue(oreName) {
+  const n = String(oreName || '')
+  // Minimal “do something with ores”: sell them for Silver.
+  // Keep values conservative so Mining doesn't wipe out other silver sources.
+  if (n === 'Copper Ore') return 1
+  if (n === 'Iron Ore') return 3
+  if (n === 'Silver Ore') return 8
+  if (n === 'Gold Ore') return 20
+  return 0
+}
+
+window.sellOre = (oreName) => {
+  const name = String(oreName || '').trim()
+  const each = clampNonNegativeInt(getOreSellValue(name))
+  if (!name || each <= 0) return
+
+  const have = clampNonNegativeInt(getInventoryQuantityByName(name))
+  if (have <= 0) return
+
+  if (!state.devIgnoreRequirements) {
+    if (!consumeInventoryByName(name, have)) return
+  }
+
+  const add = have * each
+  state.silver = clampNonNegativeInt(state.silver) + add
+  log(`Sold ${formatNumber(have)} ${name} for +${formatNumber(add)} Silver.`)
+  render()
+  saveGame()
+}
+
 function addOreToInventory(oreName, qty) {
   const n = String(oreName || '').trim()
   const q = clampNonNegativeInt(qty)
@@ -7607,8 +7636,21 @@ function renderMasteryPanel() {
 
   const tiers = getMiningConfig().tiers
   const oreRows = tiers.map(t => {
-    const have = getInventoryQuantityByName(t.oreName)
-    return `<div style="display:flex; justify-content:space-between; gap:10px;"><span>${escapeHtml(t.oreName)}</span><strong>${formatNumber(have)}</strong></div>`
+    const have = clampNonNegativeInt(getInventoryQuantityByName(t.oreName))
+    const each = clampNonNegativeInt(getOreSellValue(t.oreName))
+    const canSell = (have > 0) && (each > 0)
+    return `
+      <div class="mastery-row">
+        <div class="mastery-row-left">
+          <div class="mastery-row-title">${escapeHtml(t.oreName)}</div>
+          <div class="mastery-row-sub">Owned: <strong>${formatNumber(have)}</strong></div>
+        </div>
+        <div class="mastery-row-right">
+          <div class="mastery-row-sub">Sell: ${formatNumber(each)} Silver each</div>
+          <button class="settings-btn" onclick="window.sellOre('${escapeHtml(t.oreName)}')" ${canSell ? '' : 'disabled'}>Sell All</button>
+        </div>
+      </div>
+    `.trim()
   }).join('')
 
   const botRows = tiers.map(t => {
@@ -7620,18 +7662,15 @@ function renderMasteryPanel() {
     const perSecEach = (Number(t.basePerSec) || 0) * botMult
     const perSecTotal = perSecEach * haveBots
     return `
-      <div style="border-top:1px solid rgba(0,0,0,0.08); padding-top:10px; margin-top:10px;">
-        <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-          <div>
-            <div><strong>${escapeHtml(t.botName)}</strong></div>
-            <div style="opacity:0.8; font-size:0.92em;">Mines ${escapeHtml(t.oreName)} — You own: <strong>${formatNumber(haveBots)}</strong></div>
-            <div style="opacity:0.8; font-size:0.92em;">Rate: ${formatNumber(perSecTotal)} / sec (each ${formatNumber(perSecEach)} / sec)</div>
-          </div>
-          <div style="text-align:right;">
-            <button class="settings-btn" onclick="window.buyMiningBot('${escapeHtml(t.key)}')" ${canAfford ? '' : 'disabled'}>
-              Buy (${formatNumber(costQty)} ${escapeHtml(costName)})
-            </button>
-          </div>
+      <div class="mastery-row">
+        <div class="mastery-row-left">
+          <div class="mastery-row-title">${escapeHtml(t.botName)}</div>
+          <div class="mastery-row-sub">Mines <strong>${escapeHtml(t.oreName)}</strong> — Owned: <strong>${formatNumber(haveBots)}</strong></div>
+          <div class="mastery-row-sub">Rate: <strong>${formatNumber(perSecTotal)}</strong> / sec (each ${formatNumber(perSecEach)} / sec)</div>
+        </div>
+        <div class="mastery-row-right">
+          <div class="mastery-row-sub">Cost: ${formatNumber(costQty)} ${escapeHtml(costName)}</div>
+          <button class="settings-btn" onclick="window.buyMiningBot('${escapeHtml(t.key)}')" ${canAfford ? '' : 'disabled'}>Buy</button>
         </div>
       </div>
     `.trim()
@@ -7645,7 +7684,11 @@ function renderMasteryPanel() {
     <div class="panel-content">
       <div class="settings-block">
         <div class="settings-block-title">MINING</div>
-        <div class="settings-hint">Level: <strong>${formatNumber(lvl)}</strong> — XP: <strong>${formatNumber(xp)}</strong> (Next in ${formatNumber(toNext)})</div>
+        <div class="mastery-kpis">
+          <div class="mastery-kpi"><span>Level</span><strong>${formatNumber(lvl)}</strong></div>
+          <div class="mastery-kpi"><span>XP</span><strong>${formatNumber(xp)}</strong></div>
+          <div class="mastery-kpi"><span>Next</span><strong>${formatNumber(toNext)}</strong></div>
+        </div>
         <div class="settings-hint">Manual mine: +<strong>${formatNumber(manualYield)}</strong> Copper Ore per click</div>
         <div class="settings-hint">Bot efficiency: <strong>${formatMultiplier(botMult)}</strong></div>
         <div class="settings-hint">Bots mine while the game is open. (No offline progress yet.)</div>
@@ -7654,12 +7697,12 @@ function renderMasteryPanel() {
 
       <div class="settings-block">
         <div class="settings-block-title">ORES</div>
-        ${oreRows}
+        <div class="mastery-list">${oreRows || '<div class="inventory-empty">No ores yet.</div>'}</div>
       </div>
 
       <div class="settings-block">
         <div class="settings-block-title">BOTS</div>
-        ${botRows}
+        <div class="mastery-list">${botRows || '<div class="inventory-empty">No bots yet.</div>'}</div>
       </div>
 
       <div class="settings-block">
@@ -18914,7 +18957,6 @@ function renderRebirthTreeHtml() {
     const clickable = true
     const onclick = `window.openRebirthNodeModal(${JSON.stringify(String(n.id))})`
     const tip = String(n.tooltip || n.title || '')
-    const iconSrc = escapeHtml(String(getRebirthNodeIconSrc(n.id) || ''))
     return `
       <button
         class="rebirth-node ${purchased ? 'purchased' : ''} ${locked ? 'locked' : ''} ${(!locked && !purchased && afford && canBuy) ? 'available' : ''}"
@@ -18923,7 +18965,7 @@ function renderRebirthTreeHtml() {
         title="${escapeHtml(tip)}"
         type="button"
       >
-        <img class="rebirth-node-icon" src="${iconSrc}" alt="" />
+        <div class="rebirth-node-icon" aria-hidden="true">🌳</div>
         <div class="rebirth-node-label">${escapeHtml(String(n.title || ''))}</div>
       </button>
     `.trim()
